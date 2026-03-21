@@ -25,8 +25,8 @@
 |----------|----------|----------|
 | 只读/观察类（smoke-login, smoke-case-list） | 共享只读账号 | `readonly@test.com` |
 | 写入/修改类（smoke-case-create, smoke-file-*） | 按场景命名的专用账号 | `case-create@test.com`、`file-upload@test.com` |
-| 破坏类（smoke-case-manage, smoke-settings） | 含 `{timestamp}` 的一次性账号 | `case-manage-{timestamp}@test.com` |
-| 注册类（smoke-register, journey-new-user） | 含 `{timestamp}` 的唯一邮箱 | `newuser-{timestamp}@test.com` |
+| 破坏类（smoke-case-manage, smoke-settings） | 含 `{timestamp}` 的一次性账号 | `case-manage-{timestamp}@test.com`、`settings-{timestamp}@test.com` |
+| 注册类（smoke-register, journey-new-user） | 含 `{timestamp}` 的唯一邮箱 | `newuser-{timestamp}@test.com`、`journey-{timestamp}@test.com` |
 
 ### 环境预置
 
@@ -127,7 +127,7 @@ config/scenarios/
 - **target_url**: `{base_url}/login`
 - **goal**: 打开登录页面，使用 test_data 中的凭据登录，验证成功跳转到案件列表页
 - **assertions**:
-  - 登录页正常加载，显示邮箱和密码输入框
+  - 登录页显示邮箱和密码输入框
   - 输入凭据后点击登录按钮无报错
   - URL 变为 /cases
   - 页面有可见内容（非白屏），案件列表区域已渲染
@@ -158,9 +158,9 @@ config/scenarios/
 - **target_url**: `{base_url}/register`
 - **goal**: 打开注册页面，填写注册信息并提交，验证注册成功
 - **assertions**:
-  - 注册页面正常加载，显示注册表单
-  - 填写信息并提交后无错误
-  - 注册成功后跳转到案件列表或登录页
+  - 注册页面显示注册表单（含邮箱、密码、姓名输入框）
+  - 填写信息并提交后页面无可见错误提示
+  - 提交后 URL 变为 /cases 或 /login（注册成功）
 - **max_steps**: 15
 - **timeout_seconds**: 60
 - **test_data**: `new_user: {email: "newuser-{timestamp}@test.com", password: "NewUserPass123!", name: "测试用户"}`
@@ -168,9 +168,9 @@ config/scenarios/
 ### 4. `smoke-case-list.yaml` — 案件列表页
 
 - **name**: `smoke-case-list`
-- **description**: 验证登录后案件列表页正常展示
+- **description**: 验证登录后案件列表页元素完整可见
 - **target_url**: `{base_url}/login`
-- **goal**: 登录后验证案件列表页正常加载，检查页面元素完整性
+- **goal**: 登录后验证案件列表页加载完成，检查页面元素完整性
 - **assertions**:
   - 登录成功后 URL 变为 /cases
   - 页面有可见内容（非白屏）
@@ -222,9 +222,9 @@ config/scenarios/
 - **name**: `smoke-chat-basic`
 - **description**: 验证主工作区聊天的基本收发消息功能
 - **target_url**: `{base_url}/login`
-- **goal**: 登录后，从案件列表中选择第一个案件进入工作区，发送一条消息，验证 AI 正常回复
+- **goal**: 登录后，从案件列表中选择第一个案件进入工作区，发送一条消息，等待 AI 回复出现
 - **assertions**:
-  - 主工作区正常加载，聊天区域可见
+  - 主工作区页面有可见内容，聊天区域可见
   - 输入框可用，能输入文字
   - 发送消息后出现"正在生成"加载状态
   - 60 秒内收到 AI 回复（回复文本长度 > 0）
@@ -263,7 +263,7 @@ config/scenarios/
 - **goal**: 登录后进入案件工作区，测试停止生成、刷新后历史保留、带附件发消息
 - **assertions**:
   - 发送消息后在生成过程中点击停止按钮，加载状态消失（生成停止）
-  - 页面刷新后之前的消息仍然可见（历史加载正常）
+  - 页面刷新后之前的消息仍然可见
   - 上传文件后发送带附件的消息，消息成功发送
   - AI 回复文本长度 > 0 且回复中提及了上传文件的文件名
   - 页面无可见错误提示
@@ -282,9 +282,9 @@ config/scenarios/
 - **target_url**: `{base_url}/login`
 - **goal**: 登录后，从案件列表中选择第一个案件进入工作区，上传文件并验证文件可见可预览
 - **assertions**:
-  - 文件浏览区正常加载
+  - 文件浏览区已渲染（文件列表或空状态可见）
   - 点击上传按钮弹出上传对话框
-  - 上传测试文件成功，无错误
+  - 上传测试文件后页面无可见错误提示
   - 文件出现在文件列表中，文件名与上传文件一致
   - 点击文件后预览区域有内容渲染
 - **max_steps**: 25
@@ -297,15 +297,15 @@ config/scenarios/
 ### 11. `smoke-file-browse.yaml` — 文件浏览与管理
 
 - **name**: `smoke-file-browse`
-- **description**: 验证文件浏览、文件夹操作、文件重命名和删除
+- **description**: 验证文件夹的创建、重命名和删除操作
 - **target_url**: `{base_url}/login`
-- **goal**: 登录后，从案件列表中选择第一个案件进入工作区，验证目录树展示、新建文件夹、重命名、删除等文件管理操作
+- **goal**: 登录后，从案件列表中选择第一个案件进入工作区，验证目录树展示、新建文件夹、重命名文件夹、删除文件夹
 - **assertions**:
-  - 文件目录树正常展示（至少有一个目录节点）
+  - 文件目录树已渲染（至少有一个目录节点可见）
   - 创建新文件夹后该文件夹名称出现在目录中
   - 重命名文件夹后旧名称消失、新名称出现
   - 删除文件夹后该项从目录消失
-  - 操作过程中无可见错误提示
+  - 操作过程中页面无可见错误提示文本
 - **max_steps**: 30
 - **timeout_seconds**: 90
 - **test_data**:
@@ -321,7 +321,7 @@ config/scenarios/
 - **target_url**: `{base_url}/login`
 - **goal**: 登录后进入设置页面，测试主题切换、密码修改、退出登录，最后将密码改回原值以保持账号可用
 - **assertions**:
-  - 设置页面正常加载
+  - 设置页面有可见内容（主题选项和密码表单已渲染）
   - 主题选项可见，切换到深色主题后页面背景色发生变化
   - 切换回浅色主题后背景色恢复
   - 密码修改表单可用，提交后有成功提示
@@ -416,7 +416,7 @@ config/scenarios/
 1. **页面级**：无白屏（页面有可见内容）、无 404/500 错误页、页面标题非空
 2. **交互级**：按钮点击后有可见变化、表单提交后有反馈（成功提示或跳转）、加载状态最终消失
 3. **数据一致性**：创建的数据出现在列表中、删除的数据从列表消失、修改的数据更新正确
-4. **网络健壮性**：API 调用在合理时间内有响应（无长时间"正在加载"卡死）、超时时有可见提示
+4. **网络健壮性**：操作后 30 秒内加载状态消失（无长时间"正在加载"卡死）、如出现超时则页面显示可见提示文本
 
 ## 测试数据资产
 
