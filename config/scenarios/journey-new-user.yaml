@@ -1,0 +1,31 @@
+name: journey-new-user
+description: "模拟全新用户从注册到首次使用的完整旅程"
+target_url: "{base_url}/register"
+goal: "使用 test_data 中 new_user 的信息注册新账号，创建第一个案件并使用 questionnaire 数据填写问卷、上传 resume_file 简历，经过欢迎页进入工作区，确认初始评估触发并收到 AI 回复"
+assertions:
+  - "注册成功后 URL 变为 /cases（自动登录）"
+  - "案件列表为空状态（无案件卡片）"
+  - "新建案件并完成问卷，提交后 URL 离开 /cases/new"
+  - "简历文件名在上传后出现在页面上"
+  - "欢迎页显示品牌信息文本"
+  - "URL 变为 /cases/:id 格式（进入主工作区）"
+  - "出现正在生成状态后 90 秒内收到 AI 回复（文本长度 > 0）"
+  - "Todo 进度面板可见"
+  - "全程无可见错误提示、无白屏"
+max_steps: 50
+timeout_seconds: 300
+test_data:
+  new_user:
+    email: "journey-{timestamp}@test.com"
+    password: "JourneyPass123!"
+    name: "旅程测试用户"
+  questionnaire:
+    name: "李四"
+    birth_date: "1988-06-20"
+    employer: "某研究院"
+    position: "首席研究员"
+    industry: "生物技术"
+    education: "博士"
+    major: "分子生物学"
+    immigration_intent: "希望以杰出人才身份移民美国"
+  resume_file: "assets/files/test-resume.pdf"

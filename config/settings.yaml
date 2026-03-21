@@ -1,0 +1,18 @@
+base_url: "http://localhost:3000"
+
+llm:
+  model: "gpt-4o"
+  base_url: "https://api.openai.com/v1"
+  # api_key from .env LLM_API_KEY
+  temperature: 0.0
+
+browser:
+  headless: true
+  viewport:
+    width: 1280
+    height: 720
+
+agent:
+  max_steps: 30
+  step_timeout_seconds: 30
+  screenshot_on_failure: true

@@ -1,0 +1,19 @@
+name: smoke-settings
+description: "验证主题切换、密码修改和退出登录功能"
+target_url: "{base_url}/login"
+goal: "使用 test_data 中 credentials 登录后，导航到设置页面，执行以下操作：1) 切换到深色主题并观察页面背景色变化；2) 切换回浅色主题；3) 使用 new_password 修改密码；4) 退出登录并用新密码重新登录；5) 再次进入设置将密码改回原值 credentials.password"
+assertions:
+  - "设置页面有可见内容（主题选项和密码表单已渲染）"
+  - "切换到深色主题后页面背景色发生变化"
+  - "切换回浅色主题后背景色恢复"
+  - "密码修改表单可用，提交后有成功提示"
+  - "用新密码退出并重新登录成功"
+  - "将密码改回原值并确认成功"
+  - "退出登录后 URL 跳转到 /login"
+max_steps: 30
+timeout_seconds: 90
+test_data:
+  credentials:
+    email: "settings-{timestamp}@test.com"
+    password: "TestPass123!"
+  new_password: "NewTestPass123!"

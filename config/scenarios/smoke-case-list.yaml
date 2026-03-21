@@ -1,0 +1,16 @@
+name: smoke-case-list
+description: "验证登录后案件列表页元素完整可见"
+target_url: "{base_url}/login"
+goal: "使用 test_data 中 credentials 登录后，验证案件列表页加载完成，检查页面元素完整性"
+assertions:
+  - "登录成功后 URL 变为 /cases"
+  - "页面有可见内容（非白屏）"
+  - "如有案件则显示案件卡片（含标题文本）"
+  - "新建案件按钮可见"
+  - "页面无可见错误提示"
+max_steps: 20
+timeout_seconds: 60
+test_data:
+  credentials:
+    email: "readonly@test.com"
+    password: "TestPass123!"

@@ -1,0 +1,19 @@
+name: smoke-chat-interaction
+description: "验证停止生成、消息历史加载、带附件发消息等高级功能"
+target_url: "{base_url}/login"
+goal: "使用 test_data 中 credentials 登录后，进入案件工作区，测试以下功能：1) 发送一条消息后在生成过程中点击停止按钮；2) 刷新页面后检查之前的消息是否仍然可见；3) 上传 attachment_file 指定的文件后发送 message_with_file 的消息"
+assertions:
+  - "发送消息后在生成过程中点击停止按钮，加载状态消失（生成停止）"
+  - "页面刷新后之前的消息仍然可见"
+  - "上传文件后发送带附件的消息，消息成功发送"
+  - "AI 回复文本长度 > 0 且回复中提及了上传文件的文件名"
+  - "页面无可见错误提示"
+max_steps: 35
+timeout_seconds: 180
+test_data:
+  credentials:
+    email: "chat-interact@test.com"
+    password: "TestPass123!"
+  case_id: "auto"
+  attachment_file: "assets/files/test-doc.pdf"
+  message_with_file: "请帮我分析这份文件的内容"
