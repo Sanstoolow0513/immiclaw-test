@@ -21,12 +21,30 @@
 
 每个场景使用独立的测试账号以避免状态污染：
 
-| 场景类型 | 账号策略 |
-|----------|----------|
-| 只读/观察类（smoke-login, smoke-case-list） | 共享只读账号 `readonly@test.com` |
-| 写入/修改类（smoke-case-create, smoke-file-*） | 专用账号 `write-{scenario}@test.com` |
-| 破坏类（smoke-case-manage, smoke-settings） | 一次性账号，通过 `{timestamp}` 模板每次生成新账号 |
-| 注册类（smoke-register, journey-new-user） | 使用 `{timestamp}` 生成唯一邮箱 |
+| 场景类型 | 账号策略 | 邮箱示例 |
+|----------|----------|----------|
+| 只读/观察类（smoke-login, smoke-case-list） | 共享只读账号 | `readonly@test.com` |
+| 写入/修改类（smoke-case-create, smoke-file-*） | 按场景命名的专用账号 | `case-create@test.com`、`file-upload@test.com` |
+| 破坏类（smoke-case-manage, smoke-settings） | 含 `{timestamp}` 的一次性账号 | `case-manage-{timestamp}@test.com` |
+| 注册类（smoke-register, journey-new-user） | 含 `{timestamp}` 的唯一邮箱 | `newuser-{timestamp}@test.com` |
+
+### 环境预置
+
+运行测试前需预置以下账号（通过 seed 脚本或手动创建）：
+
+| 账号 | 密码 | 用途 | 需预置数据 |
+|------|------|------|------------|
+| `readonly@test.com` | `TestPass123!` | 只读场景 | 至少 1 个已激活案件 |
+| `case-create@test.com` | `TestPass123!` | 创建案件 | 无 |
+| `chat-basic@test.com` | `TestPass123!` | 基础聊天 | 至少 1 个已激活案件 |
+| `chat-assess@test.com` | `TestPass123!` | 初始评估 | 至少 1 个已提交问卷的案件 |
+| `chat-interact@test.com` | `TestPass123!` | 聊天交互 | 至少 1 个有聊天历史的案件 |
+| `file-upload@test.com` | `TestPass123!` | 文件上传 | 至少 1 个已激活案件 |
+| `file-browse@test.com` | `TestPass123!` | 文件浏览 | 至少 1 个含文件的案件 |
+| `journey-workflow@test.com` | `TestPass123!` | 日常工作流 | 至少 1 个已激活案件 |
+| `journey-files@test.com` | `TestPass123!` | 材料整理 | 至少 1 个已激活案件 |
+
+含 `{timestamp}` 的账号由场景运行时动态创建（通过注册 API 或注册页面），无需预置。
 
 ### case_id 解析策略
 
@@ -111,8 +129,8 @@ config/scenarios/
 - **assertions**:
   - 登录页正常加载，显示邮箱和密码输入框
   - 输入凭据后点击登录按钮无报错
-  - 成功跳转到 /cases 页面
-  - 案件列表页正常展示内容
+  - URL 变为 /cases
+  - 页面有可见内容（非白屏），案件列表区域已渲染
 - **max_steps**: 15
 - **timeout_seconds**: 60
 - **test_data**: `credentials: {email: "readonly@test.com", password: "TestPass123!"}`
@@ -170,11 +188,11 @@ config/scenarios/
 - **target_url**: `{base_url}/login`
 - **goal**: 登录后点击新建案件，填写问卷信息并上传简历，提交后验证案件创建成功
 - **assertions**:
-  - 点击新建案件后问卷页正常加载
-  - 填写基础信息（姓名、出生日期、工作单位等）无异常
-  - 上传简历文件成功
-  - 提交后跳转到欢迎页或主工作区
-  - 回到案件列表可看到刚创建的案件
+  - 点击新建案件后 URL 包含 /cases/new，页面显示表单
+  - 填写各字段后字段值正确显示（无清空或报错）
+  - 上传简历文件后文件名出现在页面上
+  - 提交后 URL 变化（离开 /cases/new）
+  - 导航回案件列表后，新案件的名称出现在列表中
 - **max_steps**: 35
 - **timeout_seconds**: 120
 - **test_data**:
@@ -229,7 +247,7 @@ config/scenarios/
   - 进入工作区后出现"正在生成"加载状态（评估触发）
   - 90 秒内收到评估回复（回复文本长度 > 0）
   - 回复中包含 EB-1A 相关关键词（如"杰出人才"、"EB-1A"、"移民"之一）
-  - 如出现选项卡组件，点击某个选项后页面有响应且无报错
+  - 如出现选项卡组件，点击某个选项后聊天区域出现新内容或加载状态
   - 聊天区域无可见错误提示
 - **max_steps**: 30
 - **timeout_seconds**: 180
@@ -327,13 +345,13 @@ config/scenarios/
 - **target_url**: `{base_url}/register`
 - **goal**: 注册新账号，创建第一个案件并完成问卷，经过欢迎页进入工作区，确认初始评估触发
 - **assertions**:
-  - 注册成功并自动登录
-  - 案件列表初始为空
-  - 新建案件并完成问卷提交
-  - 简历上传成功
-  - 欢迎页正常展示
-  - 自动跳转到主工作区
-  - 初始评估触发，60 秒内收到 AI 回复（文本长度 > 0）
+  - 注册成功后 URL 变为 /cases（自动登录）
+  - 案件列表为空状态（无案件卡片）
+  - 新建案件并完成问卷，提交后 URL 离开 /cases/new
+  - 简历文件名在上传后出现在页面上
+  - 欢迎页显示品牌信息文本
+  - URL 变为 /cases/:id 格式（进入主工作区）
+  - 出现"正在生成"状态后 90 秒内收到 AI 回复（文本长度 > 0）
   - Todo 进度面板可见
   - 全程无可见错误提示、无白屏
 - **max_steps**: 50
@@ -387,6 +405,7 @@ config/scenarios/
   - `case_id: "auto"`
   - `folders: ["推荐信", "获奖材料", "媒体报道"]`
   - `upload_files: ["assets/files/rec-letter.pdf", "assets/files/award.pdf"]`
+  - `rename_folder_to: "推荐信-已整理"`
 
 ---
 
