@@ -15,6 +15,60 @@
 | 检测范围 | 页面级 + 交互级 + 数据一致性 | 全面捕获用户可感知的问题 |
 | 聊天测试深度 | 到业务流程级 | 初始评估、选项卡、文件上下文 |
 
+## 测试隔离策略
+
+### 账号隔离
+
+每个场景使用独立的测试账号以避免状态污染：
+
+| 场景类型 | 账号策略 |
+|----------|----------|
+| 只读/观察类（smoke-login, smoke-case-list） | 共享只读账号 `readonly@test.com` |
+| 写入/修改类（smoke-case-create, smoke-file-*） | 专用账号 `write-{scenario}@test.com` |
+| 破坏类（smoke-case-manage, smoke-settings） | 一次性账号，通过 `{timestamp}` 模板每次生成新账号 |
+| 注册类（smoke-register, journey-new-user） | 使用 `{timestamp}` 生成唯一邮箱 |
+
+### case_id 解析策略
+
+`test_data` 中的 `case_id` 支持两种模式：
+
+1. **显式 ID**：直接填写真实 case_id（适合有 seed 数据的环境）
+2. **`"auto"`（默认推荐）**：当 `case_id` 为 `"auto"` 或省略时，LLM 应从案件列表中选择第一个可用案件；若列表为空，先创建一个再进入
+
+goal 描述中会明确指引 LLM 的行为，例如："登录后，从案件列表中选择第一个案件进入工作区"。
+
+### 模板变量
+
+场景 YAML 中支持以下模板变量，由运行器在加载场景时替换：
+
+| 变量 | 说明 | 替换时机 |
+|------|------|----------|
+| `{base_url}` | 目标站点地址 | 加载时，取自 settings.yaml |
+| `{timestamp}` | 当前时间戳（秒级） | 加载时，由运行器生成 |
+
+### 执行顺序
+
+冒烟测试场景设计为**可独立执行、无顺序依赖**。如需串行运行全部场景，推荐顺序：`smoke-register` → `smoke-login` → `smoke-login-error` → `smoke-case-*` → `smoke-chat-*` → `smoke-file-*` → `smoke-settings` → `journey-*`。
+
+## test_data 字段约定
+
+| 字段 | 类型 | 用途 | 使用场景 |
+|------|------|------|----------|
+| `credentials` | `{email, password}` | 登录凭据 | 需要登录的场景 |
+| `wrong_credentials` | `{email, password}` | 错误凭据 | 登录失败测试 |
+| `correct_credentials` | `{email, password}` | 正确凭据（配合 wrong 使用） | 登录恢复测试 |
+| `new_user` | `{email, password, name}` | 注册信息 | 注册场景 |
+| `case_id` | `string` | 目标案件 ID（或 `"auto"`） | 需要进入案件的场景 |
+| `questionnaire` | `{name, birth_date, employer, position, industry, education, major, immigration_intent}` | 问卷数据 | 创建案件场景 |
+| `resume_file` | `string` | 简历文件相对路径 | 创建案件场景 |
+| `upload_file` / `upload_files` | `string` / `list[string]` | 上传文件路径 | 文件上传场景 |
+| `attachment_file` | `string` | 聊天附件路径 | 带附件聊天场景 |
+| `message` / `message_with_file` | `string` | 聊天消息内容 | 聊天场景 |
+| `new_password` | `string` | 新密码 | 设置场景 |
+| `rename_to` | `string` | 重命名目标名称 | 案件管理场景 |
+| `new_folder_name` / `rename_folder_to` / `rename_file_to` | `string` | 文件夹/文件操作名称 | 文件管理场景 |
+| `folders` | `list[string]` | 批量创建文件夹名称 | 旅程场景 |
+
 ## 场景清单
 
 ### 前缀规范
@@ -35,7 +89,7 @@ config/scenarios/
 ├── smoke-case-manage.yaml     # 案件：重命名与删除
 ├── smoke-chat-basic.yaml      # 聊天：基础收发消息
 ├── smoke-chat-assessment.yaml # 聊天：初始评估流程
-├── smoke-chat-interaction.yaml# 聊天：停止生成/历史/附件
+├── smoke-chat-interaction.yaml # 聊天：停止生成/历史/附件
 ├── smoke-file-upload.yaml     # 文件：上传与预览
 ├── smoke-file-browse.yaml     # 文件：浏览与管理操作
 ├── smoke-settings.yaml        # 设置：主题/密码/登出
@@ -61,7 +115,7 @@ config/scenarios/
   - 案件列表页正常展示内容
 - **max_steps**: 15
 - **timeout_seconds**: 60
-- **test_data**: `credentials: {email: "test@example.com", password: "TestPass123!"}`
+- **test_data**: `credentials: {email: "readonly@test.com", password: "TestPass123!"}`
 
 ### 2. `smoke-login-error.yaml` — 登录失败与恢复
 
@@ -70,14 +124,14 @@ config/scenarios/
 - **target_url**: `{base_url}/login`
 - **goal**: 先用错误密码尝试登录，确认显示错误提示且不跳转；再用正确凭据登录成功
 - **assertions**:
-  - 输入错误凭据后显示错误提示信息
-  - 页面仍停留在登录页，未跳转
-  - 输入正确凭据后成功登录并跳转到 /cases
+  - 输入错误凭据后页面出现可见的错误提示文本
+  - URL 仍为 /login，未跳转
+  - 输入正确凭据后成功登录，URL 变为 /cases
 - **max_steps**: 20
 - **timeout_seconds**: 60
 - **test_data**:
-  - `wrong_credentials: {email: "test@example.com", password: "WrongPass!"}`
-  - `correct_credentials: {email: "test@example.com", password: "TestPass123!"}`
+  - `wrong_credentials: {email: "readonly@test.com", password: "WrongPass!"}`
+  - `correct_credentials: {email: "readonly@test.com", password: "TestPass123!"}`
 
 ### 3. `smoke-register.yaml` — 新用户注册
 
@@ -100,14 +154,14 @@ config/scenarios/
 - **target_url**: `{base_url}/login`
 - **goal**: 登录后验证案件列表页正常加载，检查页面元素完整性
 - **assertions**:
-  - 登录成功并跳转到 /cases
-  - 页面正常加载无白屏
-  - 如有案件则显示案件卡片（含标题、阶段信息）
-  - 新建案件按钮可见可点击
-  - 页面无 JS 错误或异常提示
+  - 登录成功后 URL 变为 /cases
+  - 页面有可见内容（非白屏）
+  - 如有案件则显示案件卡片（含标题文本）
+  - 新建案件按钮可见
+  - 页面无可见错误提示
 - **max_steps**: 20
 - **timeout_seconds**: 60
-- **test_data**: `credentials: {email: "test@example.com", password: "TestPass123!"}`
+- **test_data**: `credentials: {email: "readonly@test.com", password: "TestPass123!"}`
 
 ### 5. `smoke-case-create.yaml` — 新建案件
 
@@ -124,7 +178,7 @@ config/scenarios/
 - **max_steps**: 35
 - **timeout_seconds**: 120
 - **test_data**:
-  - `credentials: {email: "test@example.com", password: "TestPass123!"}`
+  - `credentials: {email: "case-create@test.com", password: "TestPass123!"}`
   - `questionnaire: {name: "张三", birth_date: "1990-01-15", employer: "某科技公司", position: "高级研究员", industry: "人工智能", education: "博士", major: "计算机科学", immigration_intent: "希望通过EB-1A获得美国绿卡"}`
   - `resume_file: "assets/files/test-resume.pdf"`
 
@@ -133,16 +187,16 @@ config/scenarios/
 - **name**: `smoke-case-manage`
 - **description**: 验证案件的重命名和删除操作
 - **target_url**: `{base_url}/login`
-- **goal**: 登录后在案件列表中对已有案件执行重命名和删除操作，验证操作结果正确
+- **goal**: 登录后，先创建一个临时案件用于测试，然后对该案件执行重命名和删除操作
 - **assertions**:
-  - 案件列表中至少有一个案件
-  - 重命名案件后新名称正确显示
-  - 删除案件后该案件从列表消失
-  - 操作过程中无错误提示
-- **max_steps**: 25
+  - 创建临时案件成功，该案件出现在列表中
+  - 重命名案件后列表中显示新名称
+  - 删除案件后该案件从列表中消失
+  - 操作过程中无可见错误提示
+- **max_steps**: 30
 - **timeout_seconds**: 90
 - **test_data**:
-  - `credentials: {email: "test@example.com", password: "TestPass123!"}`
+  - `credentials: {email: "case-manage-{timestamp}@test.com", password: "TestPass123!"}`
   - `rename_to: "测试重命名案件"`
 
 ### 7. `smoke-chat-basic.yaml` — 基础聊天
@@ -150,19 +204,19 @@ config/scenarios/
 - **name**: `smoke-chat-basic`
 - **description**: 验证主工作区聊天的基本收发消息功能
 - **target_url**: `{base_url}/login`
-- **goal**: 登录后进入案件工作区，发送一条消息，验证 AI 正常回复
+- **goal**: 登录后，从案件列表中选择第一个案件进入工作区，发送一条消息，验证 AI 正常回复
 - **assertions**:
   - 主工作区正常加载，聊天区域可见
   - 输入框可用，能输入文字
-  - 发送消息后出现正在生成状态
-  - 一定时间内收到 AI 回复
-  - 回复内容非空且可读
-  - 无网络错误或超时提示
+  - 发送消息后出现"正在生成"加载状态
+  - 60 秒内收到 AI 回复（回复文本长度 > 0）
+  - 回复消息渲染在聊天记录中
+  - 页面无可见错误提示
 - **max_steps**: 25
 - **timeout_seconds**: 120
 - **test_data**:
-  - `credentials: {email: "test@example.com", password: "TestPass123!"}`
-  - `case_id: "existing-case-id"`
+  - `credentials: {email: "chat-basic@test.com", password: "TestPass123!"}`
+  - `case_id: "auto"`
   - `message: "你好，请简单介绍一下EB-1A申请流程"`
 
 ### 8. `smoke-chat-assessment.yaml` — 初始评估
@@ -170,36 +224,36 @@ config/scenarios/
 - **name**: `smoke-chat-assessment`
 - **description**: 验证初始评估流程能正常触发并完成
 - **target_url**: `{base_url}/login`
-- **goal**: 登录后进入已提交问卷的案件工作区，验证初始评估自动触发并产生有意义的回复
+- **goal**: 登录后进入已提交问卷的案件工作区，验证初始评估自动触发并产生回复
 - **assertions**:
-  - 进入工作区后初始评估触发
-  - 正在生成状态出现
-  - 收到有意义的评估回复（非空、与 EB-1A 相关）
-  - 如出现选项卡（ChoicesCard），点击选项后能正常响应
-  - 聊天无中断或错误
+  - 进入工作区后出现"正在生成"加载状态（评估触发）
+  - 90 秒内收到评估回复（回复文本长度 > 0）
+  - 回复中包含 EB-1A 相关关键词（如"杰出人才"、"EB-1A"、"移民"之一）
+  - 如出现选项卡组件，点击某个选项后页面有响应且无报错
+  - 聊天区域无可见错误提示
 - **max_steps**: 30
 - **timeout_seconds**: 180
 - **test_data**:
-  - `credentials: {email: "test@example.com", password: "TestPass123!"}`
-  - `case_id: "case-with-questionnaire"`
+  - `credentials: {email: "chat-assess@test.com", password: "TestPass123!"}`
+  - `case_id: "auto"`
 
 ### 9. `smoke-chat-interaction.yaml` — 聊天高级交互
 
 - **name**: `smoke-chat-interaction`
 - **description**: 验证停止生成、消息历史加载、带附件发消息等高级功能
 - **target_url**: `{base_url}/login`
-- **goal**: 登录后进入案件工作区，测试停止生成、刷新后历史保留、带附件发消息并验证 AI 回复
+- **goal**: 登录后进入案件工作区，测试停止生成、刷新后历史保留、带附件发消息
 - **assertions**:
-  - 发送消息后在生成过程中点击停止，生成确实停止
-  - 页面刷新后消息历史正确加载
-  - 上传文件后发送带附件的消息
-  - AI 回复体现了对文件内容的理解
-  - 滚动加载更多历史消息无异常
+  - 发送消息后在生成过程中点击停止按钮，加载状态消失（生成停止）
+  - 页面刷新后之前的消息仍然可见（历史加载正常）
+  - 上传文件后发送带附件的消息，消息成功发送
+  - AI 回复文本长度 > 0 且回复中提及了上传文件的文件名
+  - 页面无可见错误提示
 - **max_steps**: 35
 - **timeout_seconds**: 180
 - **test_data**:
-  - `credentials: {email: "test@example.com", password: "TestPass123!"}`
-  - `case_id: "case-with-history"`
+  - `credentials: {email: "chat-interact@test.com", password: "TestPass123!"}`
+  - `case_id: "auto"`
   - `attachment_file: "assets/files/test-doc.pdf"`
   - `message_with_file: "请帮我分析这份文件的内容"`
 
@@ -208,19 +262,18 @@ config/scenarios/
 - **name**: `smoke-file-upload`
 - **description**: 验证文件上传和预览功能
 - **target_url**: `{base_url}/login`
-- **goal**: 登录后进入案件工作区，上传文件并验证文件可见可预览
+- **goal**: 登录后，从案件列表中选择第一个案件进入工作区，上传文件并验证文件可见可预览
 - **assertions**:
   - 文件浏览区正常加载
   - 点击上传按钮弹出上传对话框
   - 上传测试文件成功，无错误
-  - 文件出现在文件列表中
-  - 点击文件能正常预览
-  - 文件名正确显示
+  - 文件出现在文件列表中，文件名与上传文件一致
+  - 点击文件后预览区域有内容渲染
 - **max_steps**: 25
 - **timeout_seconds**: 90
 - **test_data**:
-  - `credentials: {email: "test@example.com", password: "TestPass123!"}`
-  - `case_id: "existing-case-id"`
+  - `credentials: {email: "file-upload@test.com", password: "TestPass123!"}`
+  - `case_id: "auto"`
   - `upload_file: "assets/files/test-upload.pdf"`
 
 ### 11. `smoke-file-browse.yaml` — 文件浏览与管理
@@ -228,41 +281,39 @@ config/scenarios/
 - **name**: `smoke-file-browse`
 - **description**: 验证文件浏览、文件夹操作、文件重命名和删除
 - **target_url**: `{base_url}/login`
-- **goal**: 登录后在案件工作区验证目录树展示、新建文件夹、重命名、删除等文件管理操作
+- **goal**: 登录后，从案件列表中选择第一个案件进入工作区，验证目录树展示、新建文件夹、重命名、删除等文件管理操作
 - **assertions**:
-  - 文件目录树正常展示
-  - 创建新文件夹成功且出现在目录中
-  - 文件夹可重命名
-  - 文件可重命名且名称更新正确
-  - 文件和文件夹可删除
-  - 右键菜单正常弹出可操作
-  - 操作过程中无错误提示
+  - 文件目录树正常展示（至少有一个目录节点）
+  - 创建新文件夹后该文件夹名称出现在目录中
+  - 重命名文件夹后旧名称消失、新名称出现
+  - 删除文件夹后该项从目录消失
+  - 操作过程中无可见错误提示
 - **max_steps**: 30
 - **timeout_seconds**: 90
 - **test_data**:
-  - `credentials: {email: "test@example.com", password: "TestPass123!"}`
-  - `case_id: "case-with-files"`
+  - `credentials: {email: "file-browse@test.com", password: "TestPass123!"}`
+  - `case_id: "auto"`
   - `new_folder_name: "测试文件夹"`
   - `rename_folder_to: "重命名文件夹"`
-  - `rename_file_to: "重命名文件.pdf"`
 
 ### 12. `smoke-settings.yaml` — 设置页面
 
 - **name**: `smoke-settings`
 - **description**: 验证主题切换、密码修改和退出登录功能
 - **target_url**: `{base_url}/login`
-- **goal**: 登录后进入设置页面，测试主题切换、密码修改和退出登录
+- **goal**: 登录后进入设置页面，测试主题切换、密码修改、退出登录，最后将密码改回原值以保持账号可用
 - **assertions**:
   - 设置页面正常加载
-  - 主题选项可见，切换到深色主题后样式变化
-  - 切换回浅色主题恢复正常
-  - 密码修改表单可用，提交后有成功反馈
-  - 退出登录后跳转回登录页
-  - 用新密码可重新登录
-- **max_steps**: 25
+  - 主题选项可见，切换到深色主题后页面背景色发生变化
+  - 切换回浅色主题后背景色恢复
+  - 密码修改表单可用，提交后有成功提示
+  - 用新密码退出并重新登录成功
+  - 将密码改回原值并确认成功
+  - 退出登录后 URL 跳转到 /login
+- **max_steps**: 30
 - **timeout_seconds**: 90
 - **test_data**:
-  - `credentials: {email: "test@example.com", password: "TestPass123!"}`
+  - `credentials: {email: "settings-{timestamp}@test.com", password: "TestPass123!"}`
   - `new_password: "NewTestPass123!"`
 
 ---
@@ -282,9 +333,9 @@ config/scenarios/
   - 简历上传成功
   - 欢迎页正常展示
   - 自动跳转到主工作区
-  - 初始评估触发并收到 AI 回复
-  - Todo 进度面板可见且显示阶段信息
-  - 全程无白屏、无 JS 错误、无无响应状态
+  - 初始评估触发，60 秒内收到 AI 回复（文本长度 > 0）
+  - Todo 进度面板可见
+  - 全程无可见错误提示、无白屏
 - **max_steps**: 50
 - **timeout_seconds**: 300
 - **test_data**:
@@ -297,21 +348,21 @@ config/scenarios/
 - **name**: `journey-case-workflow`
 - **description**: 模拟已有用户的日常工作流——对话、上传文件、带上下文对话、查看进度
 - **target_url**: `{base_url}/login`
-- **goal**: 登录后打开案件，与 AI 对话，上传文件后带附件继续对话，查看 Todo 进度
+- **goal**: 登录后从案件列表选择第一个案件进入，与 AI 对话，上传文件后带附件继续对话，查看 Todo 进度
 - **assertions**:
-  - 登录后案件列表加载正常
-  - 点击案件进入工作区
-  - 发送消息并收到 AI 回复
-  - 上传文件到指定目录成功
-  - 带附件发送消息后 AI 回复体现文件理解
-  - Todo 进度面板可点击跳转
-  - 刷新后聊天历史完整保留
-  - 全程无超时或无响应
+  - 登录后 URL 变为 /cases，案件列表有内容
+  - 点击案件后进入工作区，聊天区域可见
+  - 发送消息后 60 秒内收到 AI 回复（回复文本长度 > 0）
+  - 上传文件成功，文件名出现在文件列表中
+  - 带附件发送消息后 AI 回复文本长度 > 0
+  - Todo 进度面板可见
+  - 刷新页面后之前的消息仍然可见
+  - 全程无可见错误提示或超时提示
 - **max_steps**: 45
 - **timeout_seconds**: 240
 - **test_data**:
-  - `credentials: {email: "test@example.com", password: "TestPass123!"}`
-  - `case_id: "existing-case-id"`
+  - `credentials: {email: "journey-workflow@test.com", password: "TestPass123!"}`
+  - `case_id: "auto"`
   - `message: "请帮我分析一下我的材料准备情况"`
   - `upload_file: "assets/files/test-doc.pdf"`
   - `message_with_file: "请查看我上传的这份推荐信，帮我评估一下"`
@@ -321,21 +372,19 @@ config/scenarios/
 - **name**: `journey-file-management`
 - **description**: 模拟用户集中整理案件材料的完整流程
 - **target_url**: `{base_url}/login`
-- **goal**: 登录后进入案件，创建文件夹结构，上传文件，在文件夹间组织，预览、重命名、删除
+- **goal**: 登录后从案件列表选择第一个案件进入，创建文件夹结构，上传文件，预览、重命名、删除
 - **assertions**:
-  - 创建多个文件夹成功
-  - 上传文件到指定文件夹
-  - 文件列表正确反映文件位置
-  - 文件预览正常（PDF 能渲染）
-  - 重命名文件/文件夹后名称更新
-  - 删除操作后项目消失
-  - 文件变更通知正常出现
-  - 全程操作流畅无卡顿或错误
+  - 创建 test_data 中指定的文件夹后，这些文件夹名称出现在目录中
+  - 上传文件成功，文件名出现在文件列表中
+  - 点击文件后预览区域有内容渲染
+  - 重命名文件夹后旧名称消失、新名称出现
+  - 删除文件后该文件从列表消失
+  - 全程无可见错误提示
 - **max_steps**: 40
 - **timeout_seconds**: 180
 - **test_data**:
-  - `credentials: {email: "test@example.com", password: "TestPass123!"}`
-  - `case_id: "existing-case-id"`
+  - `credentials: {email: "journey-files@test.com", password: "TestPass123!"}`
+  - `case_id: "auto"`
   - `folders: ["推荐信", "获奖材料", "媒体报道"]`
   - `upload_files: ["assets/files/rec-letter.pdf", "assets/files/award.pdf"]`
 
@@ -343,12 +392,12 @@ config/scenarios/
 
 ## 通用检测要求
 
-所有场景的 goal 描述中应隐含以下检测：
+所有场景的 goal 描述中应隐含以下检测（基于页面可见状态，不依赖浏览器控制台）：
 
-1. **页面级**：无白屏、无 404/500、无 JS 控制台错误、页面标题非空
-2. **交互级**：按钮点击有响应、表单提交有反馈、加载状态正确显示和消失
+1. **页面级**：无白屏（页面有可见内容）、无 404/500 错误页、页面标题非空
+2. **交互级**：按钮点击后有可见变化、表单提交后有反馈（成功提示或跳转）、加载状态最终消失
 3. **数据一致性**：创建的数据出现在列表中、删除的数据从列表消失、修改的数据更新正确
-4. **网络健壮性**：API 调用有响应、SSE 流正常工作、超时时有用户可理解的提示
+4. **网络健壮性**：API 调用在合理时间内有响应（无长时间"正在加载"卡死）、超时时有可见提示
 
 ## 测试数据资产
 
@@ -369,7 +418,20 @@ python main.py config/scenarios/smoke-login.yaml
 # 运行单个旅程测试
 python main.py config/scenarios/journey-new-user.yaml
 
-# 按前缀批量运行（需脚本支持）
+# 按前缀批量运行
 for f in config/scenarios/smoke-*.yaml; do python main.py "$f"; done
 for f in config/scenarios/journey-*.yaml; do python main.py "$f"; done
 ```
+
+## 范围外（后续迭代）
+
+以下功能有意不包含在本次场景设计中，可根据需要在后续迭代中添加：
+
+- 忘记密码 / 邮件验证流程（产品暂无此功能）
+- 会话过期 / Token 失效后的重新登录体验
+- 多案件间快速切换
+- 欢迎页独立冒烟测试（已在 `smoke-case-create` 和 `journey-new-user` 中间接覆盖）
+- 前端路由 404 页面测试
+- 无障碍（a11y）专项测试
+- 性能基准测试（页面加载时间阈值等）
+- 多浏览器 / 移动端兼容性测试
