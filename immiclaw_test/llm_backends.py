@@ -106,3 +106,7 @@ class FakeBackend:
         if not self._responses:
             raise RuntimeError("No fake responses configured")
         return self._responses.pop(0)
+
+
+def create_backend(config: LLMConfig) -> LLMBackend:
+    return OpenAIChatBackend(config)

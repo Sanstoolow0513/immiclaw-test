@@ -6,8 +6,11 @@ import sys
 from pathlib import Path
 
 from immiclaw_test.agent import run_scenario
+from immiclaw_test.agent_runner import run_scenario_with_tools
 from immiclaw_test.browser import create_browser
 from immiclaw_test.config import load_scenario, load_settings
+from immiclaw_test.llm_backends import create_backend
+from immiclaw_test.models import AgentMode
 from immiclaw_test.reporter import print_report, save_report
 
 
@@ -48,7 +51,9 @@ async def run(args: argparse.Namespace) -> int:
         settings.base_url = args.base_url
 
     if not settings.llm.api_key:
-        print("Error: LLM_API_KEY not set. Create a .env file or set the environment variable.")
+        print(
+            "Error: LLM_API_KEY not set. Create a .env file or set the environment variable."
+        )
         return 1
 
     scenario = load_scenario(args.scenario)
@@ -60,7 +65,19 @@ async def run(args: argparse.Namespace) -> int:
     print()
 
     async with create_browser(settings.browser) as (browser, context, page):
-        report = await run_scenario(scenario, page, settings)
+        if settings.agent.mode == AgentMode.TOOLS:
+            backend = create_backend(settings.llm)
+            report = await run_scenario_with_tools(scenario, page, backend, settings)
+        elif settings.agent.mode == AgentMode.EXEC:
+            report = await run_scenario(scenario, page, settings)
+        else:
+            backend = create_backend(settings.llm)
+            try:
+                report = await run_scenario_with_tools(
+                    scenario, page, backend, settings
+                )
+            except Exception:
+                report = await run_scenario(scenario, page, settings)
 
     print_report(report)
 
