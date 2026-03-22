@@ -15,6 +15,12 @@ class TestResult(str, Enum):
     ERROR = "error"
 
 
+class AgentMode(str, Enum):
+    EXEC = "exec"
+    TOOLS = "tools"
+    HYBRID = "hybrid"
+
+
 class LLMConfig(BaseModel):
     model: str = "gpt-4o"
     base_url: str = "https://api.openai.com/v1"
@@ -33,6 +39,7 @@ class BrowserConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
+    mode: AgentMode = AgentMode.TOOLS
     max_steps: int = 30
     step_timeout_seconds: int = 30
     screenshot_on_failure: bool = True
