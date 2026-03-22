@@ -13,6 +13,7 @@ browser:
     height: 720
 
 agent:
+  mode: "tools"
   max_steps: 30
   step_timeout_seconds: 30
   screenshot_on_failure: true
