@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
 ]
 
 [build-system]
@@ -34,4 +35,5 @@ llmtest = "immiclaw_test.llm_proxy.full_test:main"
 include = ["immiclaw_test", "main.py", "README.md", "config"]
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 testpaths = ["tests"]
