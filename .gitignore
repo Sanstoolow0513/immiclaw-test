@@ -8,6 +8,14 @@ wheels/
 
 # Virtual environments
 .venv
+.environments
+.env
+
+# Root-level ad-hoc screenshots (scenario_output_dir unset; prefer artifacts/runs/)
+/*.png
 
 # Runtime output
 artifacts/
+    
+# Worktrees
+.worktrees/

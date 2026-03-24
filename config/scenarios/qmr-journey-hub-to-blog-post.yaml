@@ -1,0 +1,10 @@
+name: qmr-journey-hub-to-blog-post
+description: "从首页经博客列表进入第一篇详情，再返回列表"
+target_url: "{base_url}"
+goal: "从首页通过「博客」入口进入 /blog；在列表中打开第一篇文章（任意一篇）进入详情页，确认文章标题与正文可见；再通过「返回文章列表」回到 /blog，确认列表页再次可见"
+assertions:
+  - "导航路径：/ → /blog → /blog/<slug> → /blog，无死链"
+  - "详情页与列表页的关键标题文案与 qmr_server 设计一致"
+max_steps: 35
+timeout_seconds: 280
+test_data: {}

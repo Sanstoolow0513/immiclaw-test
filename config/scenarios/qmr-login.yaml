@@ -1,0 +1,18 @@
+name: qmr-login
+description: "登录流：在 /login 使用 test_data 中的账号与密码提交表单，验证成功进入已登录态页面（与本仓库 ImmiClaw 前端一致；base_url 须指向该前端）"
+target_url: "{base_url}/login"
+goal: >-
+  在登录页仅使用 test_data 中的 account 与 password：优先通过 page.get_by_test_id("login-email")、
+  get_by_test_id("login-password")、get_by_test_id("login-submit") 填写并提交；等待导航或网络稳定。
+  成功标准：当前 URL 不再停留在 /login（例如进入 /cases 等业务页），且页面上不存在可见的
+  data-testid="login-error" 错误提示。若账号在后端必须以邮箱格式存在而失败，应如实以 final_fail 结束并说明原因。
+  禁止：注册新用户、修改密码、清除存储外的破坏性操作、对非本场景表单提交敏感信息、重复暴力尝试登录（最多一次正式提交）。
+assertions:
+  - "提交后 URL 已离开 /login，或明确处于已登录后的主工作区路由"
+  - "不存在可见的登录失败提示区域（如 data-testid=login-error）"
+  - "未执行注册、改密或与登录无关的危险操作"
+max_steps: 26
+timeout_seconds: 120
+test_data:
+  account: "3021018823@qq.com"
+  password: "12345678"

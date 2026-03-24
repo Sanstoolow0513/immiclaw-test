@@ -1,0 +1,10 @@
+name: qmr-smoke-blog-list
+description: "qmr_server 博客列表：文章列表、元信息、返回首页"
+target_url: "{base_url}/blog"
+goal: "确认页面标题为「博客文章」或类似文案，列表中至少有一篇文章卡片（含标题、摘要、标签或日期等元信息）；存在返回首页的链接并可验证其指向根路径"
+assertions:
+  - "文章列表非空或显示「共 N 篇文章」且 N≥1"
+  - "每篇文章有链向 /blog/<slug> 详情页的入口"
+max_steps: 22
+timeout_seconds: 120
+test_data: {}

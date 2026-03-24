@@ -1,0 +1,11 @@
+name: qmr-smoke-editor
+description: "qmr_server Markdown 编辑器：侧栏、标题输入、保存按钮；处理草稿恢复弹窗"
+target_url: "{base_url}/editor"
+goal: "若出现浏览器原生的「草稿恢复」确认框，选择「取消」以关闭并继续。确认页面显示「Markdown 编辑器」、侧栏有「新建文章」按钮、主区域有文章标题输入框与正文 textarea、顶部有「保存」按钮；可选：在标题输入框填入 test_data 中的 draft_title 并点击保存，若出现成功提示或无明显错误则视为通过"
+assertions:
+  - "编辑器布局加载完整：侧栏文章列表区域与编辑区可见"
+  - "保存按钮存在；执行保存时不应出现未处理的致命错误页面"
+max_steps: 30
+timeout_seconds: 180
+test_data:
+  draft_title: "E2E 草稿 {timestamp}"

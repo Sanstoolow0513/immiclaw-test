@@ -1,0 +1,67 @@
+# Upstream targets are documented for operators; traffic goes to http://{PROXY_HOST}:{port}
+proxy_host_default: "103.127.243.93"
+anthropic_version: "2023-06-01"
+
+providers:
+  - port: 8081
+    name: gemini
+    target_host: "https://generativelanguage.googleapis.com"
+    api_family: gemini
+    env_key: GEMINI_API_KEY
+    list_path: "/v1beta/models"
+    auth_style: query_key
+
+  - port: 8082
+    name: xai
+    target_host: "https://api.x.ai"
+    api_family: openai
+    env_key: XAI_API_KEY
+    list_path: "/v1/models"
+    chat_path: "/v1/chat/completions"
+    auth_style: bearer
+
+  - port: 8083
+    name: openai
+    target_host: "https://api.openai.com"
+    api_family: openai
+    env_key: OPENAI_API_KEY
+    list_path: "/v1/models"
+    chat_path: "/v1/chat/completions"
+    auth_style: bearer
+
+  - port: 8084
+    name: anthropic
+    target_host: "https://api.anthropic.com"
+    api_family: anthropic
+    env_key: ANTHROPIC_API_KEY
+    list_path: "/v1/models"
+    messages_path: "/v1/messages"
+    auth_style: bearer
+
+  - port: 8085
+    name: volces_ark
+    target_host: "https://ark.cn-beijing.volces.com"
+    api_family: openai
+    env_key: VOLCES_API_KEY
+    list_path: "/api/v3/models"
+    chat_path: "/api/v3/chat/completions"
+    auth_style: bearer
+    probe_model: "doubao-seed-2-0-lite-260215"
+
+  - port: 8086
+    name: zhipu_bigmodel
+    target_host: "https://open.bigmodel.cn"
+    api_family: openai
+    env_key: ZHIPU_API_KEY
+    list_path: "/api/paas/v4/models"
+    chat_path: "/api/paas/v4/chat/completions"
+    auth_style: bearer
+
+  - port: 8087
+    name: moonshot
+    target_host: "https://api.moonshot.cn"
+    api_family: openai
+    env_key: MOONSHOT_API_KEY
+    list_path: "/v1/models"
+    chat_path: "/v1/chat/completions"
+    auth_style: bearer

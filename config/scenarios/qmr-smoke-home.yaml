@@ -1,0 +1,10 @@
+name: qmr-smoke-home
+description: "qmr_server 首页：Hero、三入口卡片、工作流区块可见"
+target_url: "{base_url}"
+goal: "在首页确认大标题「写作空间」、副标题关于记录想法与知识库；确认三张入口卡片分别对应博客、Markdown 编辑器、待办清单；页面主体有「Markdown 编辑思路」与「开发待办清单」两个内容区块"
+assertions:
+  - "MyBlog 品牌或站点标识在页眉可见"
+  - "三个主要功能入口（博客、编辑器、待办）均可识别"
+max_steps: 20
+timeout_seconds: 90
+test_data: {}
