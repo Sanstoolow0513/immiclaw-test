@@ -1,0 +1,24 @@
+name: qmr-smoke-register
+description: >-
+  冒烟：新用户注册（POST /api/auth/register → Token + 前端跳转 /cases）。
+  需后端 registration_enabled 与前端 VITE_REGISTRATION_ENABLED / runtime REGISTRATION_ENABLED 为开启；否则 /register 会重定向 /login。
+  组装式 Flow：作为「new-user-journey」等 flow 的原子验证步骤时，verify 会合并 flow.context 与本场景的 test_data（同名字段以场景为准）。
+  执行 Playwright 代码时仅注入 config/flows 里声明的 context，请与对应 flow 的 new_user 块保持一致。
+target_url: "{base_url}/register"
+goal: >-
+  打开注册页，若被重定向到登录页则说明注册未开启，以 final_fail 说明需开启注册开关。
+  若注册页可见，使用 test_data.new_user 填写：姓名（占位「请输入姓名」）、邮箱（「请输入邮箱」）、
+  密码与确认密码（至少 8 位，与「请输入密码」相关占位一致），点击注册/提交。
+  成功后应自动登录并进入 /cases，无红色错误提示。
+  在 --flow 会话中，邮箱/密码应与该 flow 的 context.new_user 一致（通常为 flow-{timestamp}@test.com）。
+assertions:
+  - "注册页显示表单（含姓名、邮箱、密码、确认密码）或明确因注册关闭而跳转"
+  - "提交成功后 URL 为 /cases（或已处于已登录案件列表）"
+  - "无可见的注册失败错误提示"
+max_steps: 18
+timeout_seconds: 90
+test_data:
+  new_user:
+    email: "flow-{timestamp}@test.com"
+    password: "FlowPass123!"
+    name: "测试用户"

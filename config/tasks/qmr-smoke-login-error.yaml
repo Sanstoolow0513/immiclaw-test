@@ -1,0 +1,21 @@
+name: qmr-smoke-login-error
+description: >-
+  冒烟：错误凭据登录失败提示，再用正确凭据恢复登录（backend 401 Invalid credentials）。
+  运行时请通过本任务的 test_data 提供 wrong_credentials / correct_credentials。
+target_url: "{base_url}/login"
+goal: >-
+  先用 test_data.wrong_credentials 在登录页提交，确认出现错误提示且停留在 /login；
+  再使用 correct_credentials 登录成功，URL 变为 /cases。
+assertions:
+  - "错误凭据提交后出现可见错误提示（如账号或密码错误）"
+  - "错误尝试后 URL 仍为 /login"
+  - "正确凭据登录后 URL 变为 /cases"
+max_steps: 22
+timeout_seconds: 90
+test_data:
+  wrong_credentials:
+    email: "readonly@test.com"
+    password: "WrongPass!"
+  correct_credentials:
+    email: "readonly@test.com"
+    password: "TestPass123!"

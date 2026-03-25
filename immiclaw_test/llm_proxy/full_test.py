@@ -39,12 +39,8 @@ def main() -> int:
     cfg = load_providers()
     host = effective_proxy_host(None, cfg)
 
-    list_out = run_list_all(
-        host, None, DEFAULT_TIMEOUT, cfg, include_raw=False
-    )
-    probe_out = run_probe_all(
-        host, None, DEFAULT_TIMEOUT, None, cfg, include_raw=False
-    )
+    list_out = run_list_all(host, None, DEFAULT_TIMEOUT, cfg, include_raw=False)
+    probe_out = run_probe_all(host, None, DEFAULT_TIMEOUT, None, cfg, include_raw=False)
 
     payload: dict[str, Any] = {
         "proxy_host": host,

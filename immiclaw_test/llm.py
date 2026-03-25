@@ -32,7 +32,9 @@ def _normalize_final_and_evidence(
     if not reason:
         t = thinking.strip()
         final = dict(final)
-        final["reason"] = (t[:_REASON_FALLBACK_MAX] if len(t) > _REASON_FALLBACK_MAX else t) if t else ""
+        final["reason"] = (
+            (t[:_REASON_FALLBACK_MAX] if len(t) > _REASON_FALLBACK_MAX else t) if t else ""
+        )
 
     if status == "final_fail":
         out_evidence["screenshot_required"] = True
@@ -289,9 +291,7 @@ def parse_llm_response(response_text: str) -> dict[str, Any]:
         "screenshot_required": screenshot_required,
         "points": points,
     }
-    final, evidence_dict = _normalize_final_and_evidence(
-        thinking, status, final, evidence_dict
-    )
+    final, evidence_dict = _normalize_final_and_evidence(thinking, status, final, evidence_dict)
 
     return {
         "thinking": thinking,

@@ -1,0 +1,20 @@
+name: qmr-smoke-settings
+description: >-
+  冒烟：/settings 主题、改密（POST /api/auth/change-password）、登出。
+  Flow 组装时请在 flow.context 中提供 credentials、new_password。
+target_url: "{base_url}/login"
+goal: >-
+  使用一次性账号（含 timestamp）或预置账号登录，进入 /settings。
+  切换深色/浅色主题并观察背景变化；使用 new_password 修改密码；登出后用新密码重登；最后再改回 credentials.password。
+assertions:
+  - "设置页主题与密码表单可见"
+  - "主题切换后视觉有明显变化"
+  - "改密成功有提示或下次登录生效"
+  - "可用新密码登录；最后可恢复旧密码"
+max_steps: 34
+timeout_seconds: 120
+test_data:
+  credentials:
+    email: "settings-{timestamp}@test.com"
+    password: "TestPass123!"
+  new_password: "NewTestPass123!"

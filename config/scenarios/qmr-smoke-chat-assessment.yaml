@@ -1,0 +1,22 @@
+name: qmr-smoke-chat-assessment
+description: >-
+  冒烟：初始评估阶段 — EB-1A lead agent 在问卷完成后进入工作区时的评估回复（CaseStageMiddleware / 初始评估 reference）。
+  需预置：至少一个已提交问卷、可进入主工作区的案件。
+  Flow 组装时请在 flow.context 中提供 credentials、case_id 等；执行代码仅注入 context。
+target_url: "{base_url}/login"
+goal: >-
+  使用 credentials 登录，进入已提交问卷的案件工作区（case_id auto 时选合适案件）。
+  观察是否自动触发首轮对话/生成；在合理时间内收到与 EB-1A 初始评估相关的助手回复（文本非空）。
+  若出现选项卡或 show_choices 类 UI，可点击一项并确认聊天区更新。
+assertions:
+  - "进入工作区后出现生成中或首轮助手内容"
+  - "约 90 秒内收到评估相关回复（文本长度 > 0）"
+  - "回复内容可与 EB-1A/杰出人才/评估等主题相关，或明显为案件准备引导"
+  - "聊天区无可见错误提示"
+max_steps: 32
+timeout_seconds: 200
+test_data:
+  credentials:
+    email: "chat-assess@test.com"
+    password: "TestPass123!"
+  case_id: "auto"

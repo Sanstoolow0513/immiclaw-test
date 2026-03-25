@@ -1,0 +1,31 @@
+name: qmr-smoke-case-create
+description: >-
+  冒烟：新建案件（/cases/new 问卷 + 简历上传 → 提交后进入 welcome/工作区）。
+  对应后端案件创建与材料接口；移民 agent 案件工作区依赖有效案件。
+  运行时请直接使用本任务的 test_data 提供 credentials、questionnaire、resume_file。
+target_url: "{base_url}/login"
+goal: >-
+  登录时使用 test_data.credentials。
+  进入「新建案件」，URL 含 /cases/new。按 questionnaire 填写表单（姓名、出生日期、工作单位、职务、行业、学历、专业、移民意向等必填项），
+  上传 resume_file 指定简历，提交后 URL 离开 /cases/new；返回案件列表应能看到新案件名称。
+assertions:
+  - "新建案件页 URL 含 /cases/new 且表单可见"
+  - "上传简历后文件名或上传成功状态在页面上可感知"
+  - "提交后 URL 变化（离开 /cases/new）"
+  - "回到案件列表后新案件出现在列表中"
+max_steps: 38
+timeout_seconds: 150
+test_data:
+  credentials:
+    email: "case-create@test.com"
+    password: "TestPass123!"
+  questionnaire:
+    name: "张三"
+    birth_date: "1990-01-15"
+    employer: "某科技公司"
+    position: "高级研究员"
+    industry: "人工智能"
+    education: "博士"
+    major: "计算机科学"
+    immigration_intent: "希望通过EB-1A获得美国绿卡"
+  resume_file: "assets/files/test-resume.pdf"

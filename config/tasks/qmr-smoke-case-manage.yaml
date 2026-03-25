@@ -1,0 +1,20 @@
+name: qmr-smoke-case-manage
+description: >-
+  冒烟：案件重命名与删除（需先存在可管理案件；账号用 timestamp 避免污染）。
+  运行时请通过本任务的 test_data 提供 credentials、rename_to。
+target_url: "{base_url}/login"
+goal: >-
+  使用含 {timestamp} 的邮箱先完成注册（若注册开启）或改用已预置账号登录。
+  创建最小信息案件后，在列表中对该案件重命名为 rename_to，再删除；确认列表与 UI 一致。
+assertions:
+  - "临时案件创建成功并出现在列表"
+  - "重命名后列表显示新名称"
+  - "删除后案件从列表消失"
+  - "操作过程无可见错误提示"
+max_steps: 32
+timeout_seconds: 120
+test_data:
+  credentials:
+    email: "case-manage-{timestamp}@test.com"
+    password: "TestPass123!"
+  rename_to: "测试重命名案件"

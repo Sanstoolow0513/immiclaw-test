@@ -1,0 +1,21 @@
+name: qmr-smoke-file-browse
+description: >-
+  冒烟：文件夹创建、重命名、删除（目录树操作）。
+  运行时请通过本任务的 test_data 提供 credentials 与文件夹字段。
+target_url: "{base_url}/login"
+goal: >-
+  登录后进入案件工作区文件区：新建 new_folder_name，重命名为 rename_folder_to，再删除该文件夹。
+assertions:
+  - "目录树或文件区可见"
+  - "新建文件夹后名称出现在树中"
+  - "重命名后仅新名称可见"
+  - "删除后该项消失"
+max_steps: 32
+timeout_seconds: 100
+test_data:
+  credentials:
+    email: "file-browse@test.com"
+    password: "TestPass123!"
+  case_id: "auto"
+  new_folder_name: "测试文件夹"
+  rename_folder_to: "重命名文件夹"

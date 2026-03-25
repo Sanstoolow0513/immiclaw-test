@@ -1,0 +1,19 @@
+name: qmr-smoke-case-list
+description: >-
+  冒烟：登录后案件列表页 /cases（ProtectedRoute + CaseList）。
+  Flow 组装时请在 flow.context 中提供与本场景 test_data 一致的 credentials（或 new_user），执行代码仅注入 context。
+target_url: "{base_url}/login"
+goal: >-
+  使用 test_data.credentials 登录，进入 /cases。验证页面非白屏、有「新建案件」或等价入口，
+  若存在案件则可见案件卡片；无可见错误提示。
+assertions:
+  - "登录成功后 URL 为 /cases"
+  - "页面有可见内容（非白屏）"
+  - "如有案件则显示案件标题或卡片；新建案件入口可见"
+  - "无可见全局错误提示"
+max_steps: 22
+timeout_seconds: 75
+test_data:
+  credentials:
+    email: "readonly@test.com"
+    password: "TestPass123!"

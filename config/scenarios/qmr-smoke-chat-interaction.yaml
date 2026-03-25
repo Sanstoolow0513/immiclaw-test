@@ -1,0 +1,22 @@
+name: qmr-smoke-chat-interaction
+description: >-
+  冒烟：停止生成、刷新保留历史、带附件发消息（多模态/文件上下文）。
+  Flow 组装时请在 flow.context 中提供 message、attachment_file、case_id 等。
+target_url: "{base_url}/login"
+goal: >-
+  登录后进入案件工作区。1) 发送一条消息，若在生成中可尝试点击停止。
+  2) 刷新页面，确认历史消息仍在。
+  3) 上传 attachment_file，发送 message_with_file，等待回复非空。
+assertions:
+  - "停止操作后加载状态结束或符合产品设计"
+  - "刷新后历史消息仍可见"
+  - "带附件发送成功且收到助手回复（文本非空）"
+max_steps: 38
+timeout_seconds: 200
+test_data:
+  credentials:
+    email: "chat-interact@test.com"
+    password: "TestPass123!"
+  case_id: "auto"
+  attachment_file: "assets/files/test-doc.pdf"
+  message_with_file: "请帮我分析这份文件的内容"

@@ -1,14 +1,14 @@
-"""Data models for scenarios, configuration, and test results."""
+"""Data models for tasks, configuration, and execution reports."""
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class TestResult(str, Enum):
+class TestResult(StrEnum):
     PASS = "pass"
     FAIL = "fail"
     TIMEOUT = "timeout"
@@ -45,12 +45,31 @@ class Settings(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
 
 
-class Scenario(BaseModel):
+class Skill(BaseModel):
+    name: str
+    type: str  # "operation" | "strategy"
+    description: str
+    prompt: str
+    applies_to: list[str] = Field(default_factory=list)
+    allowed_tools: list[str] = Field(default_factory=list)
+
+
+class TaskSubtask(BaseModel):
+    name: str
+    goal: str
+    done_when: list[str] = Field(default_factory=list)
+    optional: bool = False
+
+
+class Task(BaseModel):
     name: str
     description: str
-    target_url: str
+    start_url: str
     goal: str
-    assertions: list[str]
+    done_when: list[str] = Field(default_factory=list)
+    subtasks: list[TaskSubtask] = Field(default_factory=list)
+    preset: str = ""
+    skills: list[str] = Field(default_factory=list)
     max_steps: int = 30
     timeout_seconds: int = 120
     test_data: dict[str, Any] = Field(default_factory=dict)
@@ -73,11 +92,12 @@ class ExecutionResult(BaseModel):
     reported: dict[str, Any] | None = None
 
 
-class TestReport(BaseModel):
-    scenario_name: str
+class TaskReport(BaseModel):
+    task_name: str
     result: TestResult
     reason: str = ""
     total_steps: int = 0
     elapsed_seconds: float = 0.0
     steps: list[StepRecord] = Field(default_factory=list)
+    completed_subtasks: list[str] = Field(default_factory=list)
     screenshots: list[str] = Field(default_factory=list)

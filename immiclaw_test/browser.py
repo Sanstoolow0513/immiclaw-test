@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, AsyncGenerator
+from typing import TYPE_CHECKING
 
 from .models import BrowserConfig
 
@@ -17,7 +18,7 @@ async def create_browser(
     config: BrowserConfig,
     *,
     trace_path: Path | None = None,
-) -> AsyncGenerator[tuple[Browser, BrowserContext, Page], None]:
+) -> AsyncGenerator[tuple[Browser, BrowserContext, Page]]:
     """Launch a browser and yield (browser, context, page).
 
     When ``trace_path`` is set, starts Playwright tracing and writes ``trace.zip`` on exit

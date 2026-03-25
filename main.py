@@ -1,16 +1,21 @@
-"""CLI entry point for the LLM-driven Playwright testing tool."""
+"""CLI entry point for the LLM-driven Playwright task runner."""
+
+from __future__ import annotations
 
 import argparse
 import asyncio
 import sys
 from datetime import datetime
 from pathlib import Path
+import time
 
-from immiclaw_test.agent import run_scenario, scenario_dir_slug
+from immiclaw_test.agent import run_task, task_dir_slug
 from immiclaw_test.browser import create_browser
-from immiclaw_test.config import load_scenario, load_settings
-from immiclaw_test.models import Settings, TestReport
+from immiclaw_test.config import load_settings, load_task
+from immiclaw_test.llm_backends import create_backend
+from immiclaw_test.models import Task, TaskReport, TestResult
 from immiclaw_test.reporter import print_report, save_report
+from immiclaw_test.skill_loader import assemble_skills_prompt, load_skills
 
 
 def _effective_config_dir(config_dir: str | None) -> Path:
@@ -19,21 +24,12 @@ def _effective_config_dir(config_dir: str | None) -> Path:
     return Path(__file__).resolve().parent / "config"
 
 
-def iter_scenario_stems(scenarios_dir: Path) -> list[str]:
-    """Sorted unique scenario stems (filename without extension) under ``scenarios_dir``."""
-    if not scenarios_dir.is_dir():
+def iter_task_stems(tasks_dir: Path) -> list[str]:
+    if not tasks_dir.is_dir():
         return []
-    stems = {p.stem for p in scenarios_dir.glob("*.yaml")}
-    stems |= {p.stem for p in scenarios_dir.glob("*.yml")}
+    stems = {p.stem for p in tasks_dir.glob("*.yaml")}
+    stems |= {p.stem for p in tasks_dir.glob("*.yml")}
     return sorted(stems)
-
-
-def iter_scenario_paths(scenarios_dir: Path) -> list[Path]:
-    """Sorted scenario YAML paths under ``scenarios_dir`` (non-recursive)."""
-    if not scenarios_dir.is_dir():
-        return []
-    paths = list(scenarios_dir.glob("*.yaml")) + list(scenarios_dir.glob("*.yml"))
-    return sorted(paths, key=lambda p: (p.stem.lower(), p.suffix))
 
 
 def _project_root() -> Path:
@@ -41,80 +37,66 @@ def _project_root() -> Path:
 
 
 def new_run_log_dir() -> Path:
-    """Create ``artifacts/runs/<YYYYMMDD-HHMMSS>/`` for this CLI invocation."""
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = _project_root() / "artifacts" / "runs" / stamp
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
 
-def scenario_output_dir(run_dir: Path, scenario_name: str) -> Path:
-    """Per-scenario folder under a run directory."""
-    sub = run_dir / scenario_dir_slug(scenario_name)
+def task_output_dir(run_dir: Path, task_name: str) -> Path:
+    sub = run_dir / f"task-{task_dir_slug(task_name)}"
     sub.mkdir(parents=True, exist_ok=True)
     return sub
 
 
-def resolve_scenario_path(scenario: str, config_dir: Path) -> Path:
-    """Resolve CLI scenario argument to a YAML file path.
+def resolve_task_path(task_name: str | None, task_file: str | None, config_dir: Path) -> Path:
+    if task_file:
+        path = Path(task_file)
+        if path.is_file():
+            return path.resolve()
+        raise SystemExit(f"Error: task file {task_file!r} not found.")
 
-    Accepts either a filesystem path to a YAML file or a short name that maps to
-    ``<config_dir>/scenarios/<name>.yaml`` (or ``.yml``). A short name may omit
-    the extension.
-    """
-    path = Path(scenario)
+    if not task_name:
+        raise SystemExit("Error: provide a task name or --file.")
+
+    path = Path(task_name)
     if path.is_file():
         return path.resolve()
 
-    scenarios_dir = config_dir / "scenarios"
-    base = scenario
-    if base.endswith((".yaml", ".yml")):
-        base = Path(base).stem
+    tasks_dir = config_dir / "tasks"
+    base = Path(task_name).stem if task_name.endswith((".yaml", ".yml")) else task_name
     for ext in (".yaml", ".yml"):
-        candidate = scenarios_dir / f"{base}{ext}"
+        candidate = tasks_dir / f"{base}{ext}"
         if candidate.is_file():
             return candidate.resolve()
 
-    if path.suffix in (".yaml", ".yml"):
-        return path
-
-    stems = iter_scenario_stems(scenarios_dir)
+    stems = iter_task_stems(tasks_dir)
     hint = f" Known names: {', '.join(stems)}." if stems else ""
-    raise SystemExit(
-        f"Error: scenario {scenario!r} not found under {scenarios_dir}.{hint}"
-    )
+    raise SystemExit(f"Error: task {task_name!r} not found under {tasks_dir}.{hint}")
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    argv = sys.argv[1:] if argv is None else argv
+_CLI_EPILOG = """
+How execution is chosen:
+  task TASK_NAME       Run a single task from config/tasks or a direct YAML path.
+  --list-tasks         Print task stems under config/tasks; no browser, no LLM.
 
-    parser = argparse.ArgumentParser(
-        description="LLM-driven Playwright web testing tool",
-    )
-    parser.add_argument(
-        "--list",
-        action="store_true",
-        help="Print scenario short names under config/scenarios and exit",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Run every *.yaml / *.yml under config/scenarios in parallel (no SCENARIO arg)",
-    )
-    parser.add_argument(
-        "scenario",
-        nargs="?",
-        default=None,
-        metavar="SCENARIO",
-        help=(
-            "Scenario: short name (e.g. smoke-login) loads config/scenarios/<name>.yaml, "
-            "or a path to a scenario YAML file (not used with --list or --all)"
-        ),
-    )
+Dedicated subcommands handled before the parser:
+  llm-list …           LLM proxy model listing.
+  llmtest …            LLM proxy full test.
+
+Defaults when omitted:
+  --config-dir         <directory containing main.py>/config
+  --headless           From settings.yaml in that config dir
+  --base-url           From settings.yaml / environment (.env)
+  --trace              Off unless you pass --trace (optional DIR defaults to ./artifacts/traces)
+""".strip()
+
+
+def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--config-dir",
         default=None,
-        help="Path to config directory (default: ./config)",
+        help="Path to config directory (default: <immiclaw-test>/config)",
     )
     parser.add_argument(
         "--headless",
@@ -134,27 +116,63 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         metavar="DIR",
         help=(
-            "Record Playwright trace per scenario (zip under DIR; default: ./artifacts/traces). "
+            "Record Playwright trace for the task (zip under DIR; default: ./artifacts/traces). "
             "Inspect with: playwright show-trace <file.zip>"
         ),
     )
-    ns = parser.parse_args(argv)
-    if ns.list:
-        if ns.scenario is not None:
-            parser.error("argument SCENARIO: not allowed with --list")
-        if ns.all:
-            parser.error("argument --all: not allowed with --list")
-    elif ns.all:
-        if ns.scenario is not None:
-            parser.error("argument SCENARIO: not allowed with --all")
-    elif ns.scenario is None:
-        parser.error(
-            "the following arguments are required: SCENARIO (unless --list or --all)"
-        )
-    return ns
 
 
-async def run(args: argparse.Namespace) -> int:
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="LLM-driven Playwright web task runner",
+        epilog=_CLI_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--list-tasks",
+        action="store_true",
+        help="Print task short names under config/tasks and exit",
+    )
+    _add_common_args(parser)
+
+    subparsers = parser.add_subparsers(dest="command")
+    task_parser = subparsers.add_parser("task", help="Run a task")
+    task_parser.add_argument("task_name", nargs="?", metavar="TASK_NAME", help="Task name or YAML path")
+    task_parser.add_argument("--file", dest="task_file", default=None, help="Path to task YAML")
+    _add_common_args(task_parser)
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    argv = sys.argv[1:] if argv is None else argv
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
+    if args.list_tasks:
+        return args
+    if args.command != "task":
+        parser.error("choose either --list-tasks or the 'task' subcommand")
+    if not args.task_name and not args.task_file:
+        parser.error("task requires TASK_NAME or --file")
+    return args
+
+
+def load_task_skills(task, cfg_root: Path):
+    skills_dir = cfg_root / "skills"
+    skills = load_skills(task.skills, skills_dir) if task.skills else []
+    skills_prompt = assemble_skills_prompt(skills) if skills else ""
+    return skills, skills_prompt
+
+
+def _build_error_report(task: Task, reason: str, *, start_time: float) -> TaskReport:
+    return TaskReport(
+        task_name=task.name,
+        result=TestResult.ERROR,
+        reason=reason,
+        elapsed_seconds=round(time.time() - start_time, 2),
+    )
+
+
+async def run_task_cmd(args: argparse.Namespace) -> int:
     _install_quiet_exception_handler()
     cfg_root = _effective_config_dir(args.config_dir)
     config_dir = Path(args.config_dir) if args.config_dir else None
@@ -165,42 +183,53 @@ async def run(args: argparse.Namespace) -> int:
     if args.base_url:
         settings.base_url = args.base_url
 
-    scenario_path = resolve_scenario_path(args.scenario, cfg_root)
+    task_path = resolve_task_path(args.task_name, args.task_file, cfg_root)
 
     if not settings.llm.api_key:
         print("Error: LLM_API_KEY not set. Create a .env file or set the environment variable.")
         return 1
 
-    scenario = load_scenario(scenario_path)
+    task = load_task(task_path)
+    skills, skills_prompt = load_task_skills(task, cfg_root)
 
     run_dir = new_run_log_dir()
-    scen_dir = scenario_output_dir(run_dir, scenario.name)
+    out_dir = task_output_dir(run_dir, task.name)
     print(f"Run log: {run_dir.resolve()}")
-    print(f"  Scenario output: {scen_dir.resolve()}")
+    print(f"  Task output: {out_dir.resolve()}")
 
     trace_file: Path | None = None
     if args.trace:
         trace_dir = Path(args.trace)
-        trace_file = trace_dir / f"{scenario.name}-{datetime.now():%Y%m%d-%H%M%S}.zip"
+        trace_file = trace_dir / f"{task.name}-{datetime.now():%Y%m%d-%H%M%S}.zip"
 
-    print(f"Running scenario: {scenario.name}")
-    print(f"  Target: {scenario.target_url.format(base_url=settings.base_url)}")
+    print(f"Running task: {task.name}")
+    print(f"  Target: {task.start_url.format(base_url=settings.base_url)}")
     print(f"  Model:  {settings.llm.model}")
-    print(f"  Goal:   {scenario.goal[:80]}...")
+    print(f"  Goal:   {task.goal[:80]}...")
     print()
 
-    async with create_browser(settings.browser, trace_path=trace_file) as (
-        browser,
-        context,
-        page,
-    ):
-        report = await run_scenario(
-            scenario, page, settings, scenario_output_dir=scen_dir
+    started_at = time.time()
+    try:
+        async with create_browser(settings.browser, trace_path=trace_file) as (_, _, page):
+            report = await run_task(
+                task=task,
+                page=page,
+                backend=create_backend(settings.llm),
+                settings=settings,
+                skills=skills,
+                skills_prompt=skills_prompt,
+                output_dir=out_dir,
+            )
+    except Exception as exc:
+        report = _build_error_report(
+            task,
+            f"{type(exc).__name__}: {exc}",
+            start_time=started_at,
         )
 
     print_report(report)
 
-    report_path = save_report(report, output_dir=scen_dir)
+    report_path = save_report(report, output_dir=out_dir)
     print(f"Report saved to: {report_path}")
     if trace_file is not None:
         print(f"Playwright trace: {trace_file.resolve()}")
@@ -208,45 +237,7 @@ async def run(args: argparse.Namespace) -> int:
     return 0 if report.result.value == "pass" else 1
 
 
-async def _run_one_scenario_path(
-    scenario_path: Path,
-    settings: Settings,
-    run_log_dir: Path,
-    trace_dir: Path | None = None,
-) -> tuple[Path, TestReport | Exception, Path | None]:
-    """Run a single scenario file.
-
-    Returns ``(path, report_or_exc, trace_zip_or_none)``.
-    """
-    trace_file: Path | None = None
-    try:
-        scenario = load_scenario(scenario_path)
-        scen_dir = scenario_output_dir(run_log_dir, scenario.name)
-        if trace_dir is not None:
-            trace_file = (
-                trace_dir
-                / f"{scenario.name}-{datetime.now():%Y%m%d-%H%M%S}.zip"
-            )
-        async with create_browser(settings.browser, trace_path=trace_file) as (
-            _,
-            _,
-            page,
-        ):
-            report = await run_scenario(
-                scenario, page, settings, scenario_output_dir=scen_dir
-            )
-        return scenario_path, report, trace_file
-    except Exception as exc:
-        return scenario_path, exc, None
-
-
 def _install_quiet_exception_handler() -> None:
-    """Suppress 'Future exception was never retrieved' noise from cancelled Playwright ops.
-
-    When asyncio.wait_for cancels a timed-out step, Playwright's internal Futures may
-    complete with TimeoutError after the task is gone.  Python's default exception handler
-    prints a warning for every such Future; we silence those specific cases.
-    """
     loop = asyncio.get_event_loop()
     default = loop.get_exception_handler()
 
@@ -262,86 +253,13 @@ def _install_quiet_exception_handler() -> None:
     loop.set_exception_handler(_handler)
 
 
-async def run_all_parallel(args: argparse.Namespace) -> int:
-    """Load settings once, run every scenario under config/scenarios in parallel."""
-    _install_quiet_exception_handler()
+def cmd_list_tasks(args: argparse.Namespace) -> int:
     cfg_root = _effective_config_dir(args.config_dir)
-    config_dir = Path(args.config_dir) if args.config_dir else None
-    settings = load_settings(config_dir)
-
-    if args.headless is not None:
-        settings.browser.headless = args.headless == "true"
-    if args.base_url:
-        settings.base_url = args.base_url
-
-    if not settings.llm.api_key:
-        print("Error: LLM_API_KEY not set. Create a .env file or set the environment variable.")
+    tasks_dir = cfg_root / "tasks"
+    if not tasks_dir.is_dir():
+        print(f"Error: tasks directory not found: {tasks_dir}", file=sys.stderr)
         return 1
-
-    scenarios_dir = cfg_root / "scenarios"
-    paths = iter_scenario_paths(scenarios_dir)
-    if not paths:
-        print(f"Error: no scenario YAML files found under {scenarios_dir}", file=sys.stderr)
-        return 1
-
-    run_dir = new_run_log_dir()
-    print(f"Run log: {run_dir.resolve()}")
-
-    print(f"Running {len(paths)} scenarios in parallel under {scenarios_dir}")
-    print(f"  Model: {settings.llm.model}")
-    print(f"  Base:  {settings.base_url}")
-    print()
-
-    trace_dir: Path | None = Path(args.trace) if args.trace else None
-    if trace_dir is not None:
-        trace_dir.mkdir(parents=True, exist_ok=True)
-
-    results = await asyncio.gather(
-        *(
-            _run_one_scenario_path(p, settings, run_dir, trace_dir)
-            for p in paths
-        ),
-    )
-
-    exit_code = 0
-    saved: list[tuple[Path, Path | None, str]] = []
-
-    for scenario_path, outcome, trace_file in results:
-        if isinstance(outcome, TestReport):
-            print_report(outcome)
-            if trace_file is not None:
-                print(f"Playwright trace: {trace_file.resolve()}")
-            try:
-                scen_dir = scenario_output_dir(run_dir, outcome.scenario_name)
-                report_path = save_report(outcome, output_dir=scen_dir)
-                saved.append((scenario_path, report_path, outcome.result.value))
-                print(f"Report saved to: {report_path}")
-            except OSError as e:
-                saved.append((scenario_path, None, f"save_error:{e}"))
-                print(f"Error saving report for {scenario_path}: {e}", file=sys.stderr)
-                exit_code = 1
-            if outcome.result.value != "pass":
-                exit_code = 1
-        else:
-            print(f"\n{'=' * 60}", file=sys.stderr)
-            print(f"  Scenario file failed: {scenario_path}", file=sys.stderr)
-            print(f"  {outcome!r}", file=sys.stderr)
-            print(f"{'=' * 60}\n", file=sys.stderr)
-            saved.append((scenario_path, None, "error"))
-            exit_code = 1
-
-    passed = sum(1 for _, _, s in saved if s == "pass")
-    print(f"Summary: {passed}/{len(saved)} passed")
-    return exit_code
-
-
-def cmd_list(args: argparse.Namespace) -> int:
-    cfg_root = _effective_config_dir(args.config_dir)
-    scenarios_dir = cfg_root / "scenarios"
-    if not scenarios_dir.is_dir():
-        print(f"Error: scenarios directory not found: {scenarios_dir}", file=sys.stderr)
-        return 1
-    for stem in iter_scenario_stems(scenarios_dir):
+    for stem in iter_task_stems(tasks_dir):
         print(stem)
     return 0
 
@@ -358,13 +276,15 @@ def main() -> None:
 
         sys.exit(main_llmtest())
 
-    args = parse_args()
-    if args.list:
-        sys.exit(cmd_list(args))
-    if args.all:
-        exit_code = asyncio.run(run_all_parallel(args))
-    else:
-        exit_code = asyncio.run(run(args))
+    if not argv:
+        build_arg_parser().print_help()
+        sys.exit(0)
+
+    args = parse_args(argv)
+    if args.list_tasks:
+        sys.exit(cmd_list_tasks(args))
+
+    exit_code = asyncio.run(run_task_cmd(args))
     sys.exit(exit_code)
 
 

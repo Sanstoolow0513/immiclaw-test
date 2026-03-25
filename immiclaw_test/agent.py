@@ -1,392 +1,366 @@
-"""Agent loop - the observe -> prompt -> LLM -> exec -> feedback cycle."""
-
 from __future__ import annotations
 
-import json
-from datetime import datetime
 from pathlib import Path
 import re
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from .executor import execute_code
-from .llm import build_system_prompt, create_client, parse_llm_response, trim_messages
-from .models import (
-    Scenario,
-    Settings,
-    StepRecord,
-    TestReport,
-    TestResult,
+from .agent_context import (
+    build_system_prompt,
+    build_tool_result_message,
+    build_turn_messages,
 )
+from .llm_backends import LLMBackend, ToolCall
+from .models import Settings, Skill, StepRecord, Task, TaskReport, TestResult
 from .observer import format_state_for_llm, get_page_state
+from .tool_models import (
+    AssertTextInput,
+    AssertVisibleInput,
+    CheckInput,
+    ClickInput,
+    FillInput,
+    GetPageInfoInput,
+    GoBackInput,
+    HoverInput,
+    IsVisibleInput,
+    MarkSubtaskDoneInput,
+    NavigateInput,
+    PressInput,
+    ReadTextInput,
+    ReloadInput,
+    RememberInput,
+    ReportResultInput,
+    ScrollInput,
+    TypeInput,
+    WaitForLoadStateInput,
+    WaitForSelectorInput,
+    WaitForTimeoutInput,
+    get_tool_schemas,
+    register_tool,
+)
+from .tool_runtime import SessionMemory, ToolRuntime
 
-if TYPE_CHECKING:
-    from playwright.async_api import Page
 
-
-_FEEDBACK_STDOUT_MAX_CHARS = 6000
-
-
-def _truncate_feedback_stdout(text: str, max_chars: int = _FEEDBACK_STDOUT_MAX_CHARS) -> str:
-    """Limit code stdout in LLM feedback so one verbose print does not blow the context window."""
-    if len(text) <= max_chars:
-        return text
-    return f"{text[:max_chars]}\n...[stdout truncated for prompt size; full output is in step records / reports]"
-
-
-def _slugify(value: str) -> str:
-    text = re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip())
+def task_dir_slug(name: str) -> str:
+    """Filesystem-safe single path segment for a task name."""
+    text = re.sub(r"[^a-zA-Z0-9_-]+", "-", name.strip())
     text = re.sub(r"-{2,}", "-", text).strip("-_")
     return text or "unknown"
 
 
-def scenario_dir_slug(name: str) -> str:
-    """Filesystem-safe single path segment for a scenario name (run output subfolder)."""
-    return _slugify(name)
+def _ensure_default_tools_registered() -> None:
+    register_tool("navigate", NavigateInput)
+    register_tool("reload_page", ReloadInput)
+    register_tool("go_back", GoBackInput)
+    register_tool("click", ClickInput)
+    register_tool("fill", FillInput)
+    register_tool("type_text", TypeInput)
+    register_tool("press", PressInput)
+    register_tool("hover", HoverInput)
+    register_tool("check", CheckInput)
+    register_tool("scroll", ScrollInput)
+    register_tool("wait_for", WaitForSelectorInput)
+    register_tool("wait_for_load_state", WaitForLoadStateInput)
+    register_tool("wait_for_timeout", WaitForTimeoutInput)
+    register_tool("read_text", ReadTextInput)
+    register_tool("get_page_info", GetPageInfoInput)
+    register_tool("is_visible", IsVisibleInput)
+    register_tool("assert_visible", AssertVisibleInput)
+    register_tool("assert_text", AssertTextInput)
+    register_tool("remember", RememberInput)
+    register_tool("mark_subtask_done", MarkSubtaskDoneInput)
+    register_tool("report_result", ReportResultInput)
 
 
-def _build_screenshot_path(
-    scenario_output_dir: Path | None,
-    scenario_name: str,
-    name: str,
-) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    name_slug = _slugify(name)
-    if scenario_output_dir is not None:
-        scenario_output_dir.mkdir(parents=True, exist_ok=True)
-        return scenario_output_dir / f"{timestamp}--{name_slug}.png"
-    task_slug = _slugify(scenario_name)
-    repo_root = Path(__file__).resolve().parent.parent
-    runs = repo_root / "artifacts" / "runs"
-    runs.mkdir(parents=True, exist_ok=True)
-    output_path = runs / f"{timestamp}--{task_slug}--{name_slug}.png"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    return output_path
-
-
-def _write_model_json(
-    scenario_output_dir: Path | None,
-    scenario_name: str,
-    llm_model: str,
-    events: list[dict[str, Any]],
-) -> None:
-    if scenario_output_dir is None:
-        return
-    scenario_output_dir.mkdir(parents=True, exist_ok=True)
-    path = scenario_output_dir / "model.json"
-    payload: dict[str, Any] = {
-        "scenario_name": scenario_name,
-        "llm_model": llm_model,
-        "events": events,
-    }
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-
-
-def _usage_dict(response: Any) -> dict[str, Any] | None:
-    u = getattr(response, "usage", None)
-    if u is None:
-        return None
+def _assistant_tool_message(content: str | None, tool_calls: list[ToolCall]) -> dict[str, Any]:
     return {
-        "prompt_tokens": getattr(u, "prompt_tokens", None),
-        "completion_tokens": getattr(u, "completion_tokens", None),
-        "total_tokens": getattr(u, "total_tokens", None),
+        "role": "assistant",
+        "content": content or "",
+        "tool_calls": [
+            {
+                "id": tool_call.id,
+                "type": "function",
+                "function": {
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                },
+            }
+            for tool_call in tool_calls
+        ],
     }
-
-
-async def run_scenario(
-    scenario: Scenario,
-    page: Page,
-    settings: Settings,
-    scenario_output_dir: Path | None = None,
-) -> TestReport:
-    """Execute a test scenario via the LLM agent loop.
-
-    Loop:
-    1. Observe page state (accessibility tree)
-    2. Send state to LLM, receive generated Python code
-    3. Execute code via exec() with page in namespace
-    4. Feed result/error back to LLM
-    5. Repeat until report_result() called, max_steps, or timeout
-    """
-    client = create_client(settings.llm)
-
-    system_prompt = build_system_prompt(
-        goal=scenario.goal,
-        assertions=scenario.assertions,
-        test_data=scenario.test_data,
-    )
-
-    messages: list[dict[str, str]] = [
-        {"role": "system", "content": system_prompt},
-    ]
-
-    max_steps = scenario.max_steps
-    step_timeout = settings.agent.step_timeout_seconds
-
-    steps: list[StepRecord] = []
-    screenshots: list[str] = []
-    start_time = time.time()
-    step_state: dict[str, Any] = {}
-    model_events: list[dict[str, Any]] = []
-
-    target_url = scenario.target_url.format(base_url=settings.base_url)
-    await page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
-
-    try:
-        for step_num in range(1, max_steps + 1):
-            elapsed = time.time() - start_time
-            if elapsed > scenario.timeout_seconds:
-                return _build_report(
-                    scenario, TestResult.TIMEOUT,
-                    "Exceeded scenario timeout",
-                    steps, screenshots, elapsed,
-                )
-
-            page_state = await get_page_state(page)
-            state_text = format_state_for_llm(page_state)
-
-            step_msg = f"Step {step_num}/{max_steps}\n\n{state_text}"
-            messages.append({"role": "user", "content": step_msg})
-            trim_messages(messages)
-
-            try:
-                response = await client.chat.completions.create(
-                    model=settings.llm.model,
-                    messages=messages,
-                    temperature=settings.llm.temperature,
-                )
-                response_text = response.choices[0].message.content or ""
-                messages.append({"role": "assistant", "content": response_text})
-                model_events.append(
-                    {
-                        "event": "completion",
-                        "step": step_num,
-                        "timestamp": datetime.now().isoformat(timespec="seconds"),
-                        "user_message_chars": len(step_msg),
-                        "assistant_message": response_text,
-                        "usage": _usage_dict(response),
-                    },
-                )
-
-                parsed = parse_llm_response(response_text)
-                thinking = parsed["thinking"]
-                code = parsed["code"]
-                status = parsed["status"]
-                evidence = parsed["evidence"]
-                final = parsed["final"]
-                points = evidence.get("points", [])
-            except Exception as e:
-                model_events.append(
-                    {
-                        "event": "error",
-                        "step": step_num,
-                        "timestamp": datetime.now().isoformat(timespec="seconds"),
-                        "user_message_chars": len(step_msg),
-                        "error": str(e),
-                    },
-                )
-                steps.append(StepRecord(
-                    step_number=step_num,
-                    thinking="Failed to get/parse LLM response",
-                    success=False,
-                    error=f"LLM error: {e}",
-                    page_url=page.url,
-                ))
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        f"Error parsing your response: {e}\n"
-                        'Please respond with valid JSON fields including '
-                        '{"thinking": "...", "code": "...", "status": "continue|final_pass|final_fail"}'
-                    ),
-                })
-                continue
-
-            if status in {"final_pass", "final_fail"}:
-                validation_error = _validate_final_payload(status, final, evidence)
-                if validation_error:
-                    steps.append(StepRecord(
-                        step_number=step_num,
-                        code=code,
-                        thinking=thinking,
-                        success=False,
-                        error=validation_error,
-                        page_url=page.url,
-                    ))
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            f"Invalid final response: {validation_error}\n"
-                            "Please resend a valid final JSON with required fields."
-                        ),
-                    })
-                    continue
-
-                reason = (final or {}).get("reason", "") or "Final decision reported by model."
-                if points:
-                    reason = _merge_reason_and_points(reason, points)
-
-                if status == "final_fail" and settings.agent.screenshot_on_failure and evidence.get("screenshot_required", False):
-                    ss_path = _build_screenshot_path(
-                        scenario_output_dir,
-                        scenario.name,
-                        f"final-fail-step{step_num}",
-                    )
-                    try:
-                        await page.screenshot(path=str(ss_path))
-                        screenshots.append(str(ss_path))
-                    except Exception:
-                        pass
-
-                steps.append(StepRecord(
-                    step_number=step_num,
-                    code=code,
-                    thinking=thinking,
-                    output="",
-                    error=None if status == "final_pass" else reason,
-                    success=status == "final_pass",
-                    page_url=page.url,
-                ))
-                return _build_report(
-                    scenario,
-                    TestResult.PASS if status == "final_pass" else TestResult.FAIL,
-                    reason,
-                    steps,
-                    screenshots,
-                    time.time() - start_time,
-                )
-
-            if not code.strip():
-                steps.append(StepRecord(
-                    step_number=step_num,
-                    thinking=thinking,
-                    success=False,
-                    error="LLM returned empty code",
-                    page_url=page.url,
-                ))
-                messages.append({
-                    "role": "user",
-                    "content": "Your response contained no code. Please provide code to execute.",
-                })
-                continue
-
-            result = await execute_code(
-                code=code,
-                page=page,
-                test_data=scenario.test_data,
-                timeout=float(step_timeout),
-                step_state=step_state,
-            )
-
-            steps.append(StepRecord(
-                step_number=step_num,
-                code=code,
-                thinking=thinking,
-                output=result.output,
-                error=result.error,
-                success=result.success,
-                page_url=page.url,
-            ))
-
-            if result.reported:
-                passed = result.reported.get("passed", False)
-                reason = result.reported.get("reason", "")
-                final_result = TestResult.PASS if passed else TestResult.FAIL
-                return _build_report(
-                    scenario, final_result, reason,
-                    steps, screenshots, time.time() - start_time,
-                )
-
-            if result.success:
-                feedback = f"Code executed successfully."
-                if result.output:
-                    feedback += f"\nOutput:\n{_truncate_feedback_stdout(result.output)}"
-            else:
-                feedback = f"Code execution failed.\nError: {result.error}"
-                if result.output:
-                    feedback += f"\nPartial output:\n{_truncate_feedback_stdout(result.output)}"
-
-                if settings.agent.screenshot_on_failure:
-                    ss_path = _build_screenshot_path(
-                        scenario_output_dir,
-                        scenario.name,
-                        f"fail-step{step_num}",
-                    )
-                    try:
-                        await page.screenshot(path=str(ss_path))
-                        screenshots.append(str(ss_path))
-                    except Exception:
-                        pass
-
-            if points:
-                feedback += "\nLLM noted issue points:\n" + "\n".join(f"- {p}" for p in points)
-
-            messages.append({"role": "user", "content": feedback})
-
-        return _build_report(
-            scenario, TestResult.TIMEOUT,
-            "Reached max steps",
-            steps, screenshots, time.time() - start_time,
-        )
-    finally:
-        _write_model_json(
-            scenario_output_dir,
-            scenario.name,
-            settings.llm.model,
-            model_events,
-        )
 
 
 def _build_report(
-    scenario: Scenario,
+    task: Task,
     result: TestResult,
     reason: str,
+    step_count: int,
     steps: list[StepRecord],
-    screenshots: list[str],
-    elapsed: float,
-) -> TestReport:
-    return TestReport(
-        scenario_name=scenario.name,
+    completed_subtasks: list[str],
+    start_time: float,
+    screenshots: list[str] | None = None,
+) -> TaskReport:
+    return TaskReport(
+        task_name=task.name,
         result=result,
         reason=reason,
-        total_steps=len(steps),
-        elapsed_seconds=round(elapsed, 2),
+        total_steps=step_count,
+        elapsed_seconds=round(time.time() - start_time, 2),
         steps=steps,
+        completed_subtasks=completed_subtasks,
+        screenshots=screenshots or [],
+    )
+
+
+def _resolve_allowed_tools(skills: list[Skill]) -> list[str] | None:
+    declared = [tool for skill in skills for tool in skill.allowed_tools]
+    if not declared:
+        return None
+
+    allowed = set(declared)
+    allowed.update(
+        {
+            "get_page_info",
+            "read_text",
+            "is_visible",
+            "assert_visible",
+            "assert_text",
+            "remember",
+            "mark_subtask_done",
+            "report_result",
+            "wait_for",
+            "wait_for_load_state",
+            "wait_for_timeout",
+            "reload_page",
+        }
+    )
+    return sorted(allowed)
+
+
+def _task_timed_out(start_time: float, timeout_seconds: int) -> bool:
+    return (time.time() - start_time) >= timeout_seconds
+
+
+async def _capture_failure_screenshot(
+    page: Any,
+    *,
+    output_dir: Path | None,
+    task: Task,
+    step_count: int,
+) -> list[str]:
+    if output_dir is None:
+        return []
+
+    screenshots_dir = output_dir / "screenshots"
+    screenshots_dir.mkdir(parents=True, exist_ok=True)
+    file_path = screenshots_dir / f"{task_dir_slug(task.name)}-step-{step_count or 0}.png"
+    await page.screenshot(path=str(file_path), full_page=True)
+    return [str(file_path)]
+
+
+async def _finalize_report(
+    *,
+    task: Task,
+    page: Any,
+    settings: Settings,
+    result: TestResult,
+    reason: str,
+    step_count: int,
+    steps: list[StepRecord],
+    completed_subtasks: list[str],
+    start_time: float,
+    output_dir: Path | None,
+    final_result: dict[str, Any] | None = None,
+) -> TaskReport:
+    screenshots: list[str] = []
+    should_capture = settings.agent.screenshot_on_failure and result in {
+        TestResult.FAIL,
+        TestResult.TIMEOUT,
+        TestResult.ERROR,
+    }
+    if final_result is not None and final_result.get("passed") is False:
+        should_capture = should_capture and bool(final_result.get("screenshot_on_fail", True))
+
+    if should_capture:
+        try:
+            screenshots = await _capture_failure_screenshot(
+                page,
+                output_dir=output_dir,
+                task=task,
+                step_count=step_count,
+            )
+        except Exception:
+            screenshots = []
+
+    return _build_report(
+        task=task,
+        result=result,
+        reason=reason,
+        step_count=step_count,
+        steps=steps,
+        completed_subtasks=completed_subtasks,
+        start_time=start_time,
         screenshots=screenshots,
     )
 
 
-def _validate_final_payload(
-    status: str,
-    final: dict[str, Any] | None,
-    evidence: dict[str, Any],
-) -> str | None:
-    if final is None:
-        return "`final` object is required when status is final_*."
+async def run_task(
+    task: Task,
+    page: Any,
+    backend: LLMBackend,
+    settings: Settings,
+    *,
+    skills: list[Skill] | None = None,
+    skills_prompt: str = "",
+    output_dir: Path | None = None,
+) -> TaskReport:
+    _ensure_default_tools_registered()
 
-    passed = bool(final.get("passed"))
-    if status == "final_pass" and not passed:
-        return "`final.passed` must be true when status=final_pass."
-    if status == "final_fail" and passed:
-        return "`final.passed` must be false when status=final_fail."
+    memory = SessionMemory()
+    runtime = ToolRuntime(page, memory)
+    active_skills = skills or []
+    tools = get_tool_schemas(_resolve_allowed_tools(active_skills))
 
-    reason = str(final.get("reason", "")).strip()
-    if not reason:
-        return "`final.reason` is required when status is final_*."
+    system_prompt = build_system_prompt(task, skills_prompt=skills_prompt)
+    transcript: list[dict[str, Any]] = []
+    steps: list[StepRecord] = []
+    start_time = time.time()
+    target_url = task.start_url.format(base_url=settings.base_url)
 
-    if status == "final_fail":
-        if not evidence.get("screenshot_required", False):
-            return "`evidence.screenshot_required` must be true when status=final_fail."
-        points = evidence.get("points", [])
-        if not isinstance(points, list) or not any(str(p).strip() for p in points):
-            return "At least one non-empty item is required in `evidence.points` when status=final_fail."
-    return None
+    if _task_timed_out(start_time, task.timeout_seconds):
+        return await _finalize_report(
+            task=task,
+            page=page,
+            settings=settings,
+            result=TestResult.TIMEOUT,
+            reason=f"Task exceeded timeout of {task.timeout_seconds}s",
+            step_count=0,
+            steps=steps,
+            completed_subtasks=_completed_subtasks(task, memory),
+            start_time=start_time,
+            output_dir=output_dir,
+        )
+
+    remaining_ms = max(int((task.timeout_seconds - (time.time() - start_time)) * 1000), 1)
+    await page.goto(target_url, wait_until="domcontentloaded", timeout=min(15000, remaining_ms))
+
+    for step_num in range(1, task.max_steps + 1):
+        if _task_timed_out(start_time, task.timeout_seconds):
+            return await _finalize_report(
+                task=task,
+                page=page,
+                settings=settings,
+                result=TestResult.TIMEOUT,
+                reason=f"Task exceeded timeout of {task.timeout_seconds}s",
+                step_count=step_num - 1,
+                steps=steps,
+                completed_subtasks=_completed_subtasks(task, memory),
+                start_time=start_time,
+                output_dir=output_dir,
+            )
+
+        page_state = await get_page_state(page)
+        observation = format_state_for_llm(page_state)
+
+        messages = build_turn_messages(system_prompt, observation, memory, transcript)
+        turn = await backend.next_turn(messages, tools)
+
+        if turn.is_terminal:
+            return await _finalize_report(
+                task=task,
+                page=page,
+                settings=settings,
+                result=TestResult.FAIL,
+                reason="Agent stopped without reporting result",
+                step_count=step_num,
+                steps=steps,
+                completed_subtasks=_completed_subtasks(task, memory),
+                start_time=start_time,
+                output_dir=output_dir,
+            )
+
+        tool_calls = turn.tool_calls or []
+        if tool_calls:
+            transcript.append(_assistant_tool_message(turn.content, tool_calls))
+
+        for tool_call in tool_calls:
+            result = await runtime.execute(tool_call.name, tool_call.parse_arguments())
+
+            steps.append(
+                StepRecord(
+                    step_number=step_num,
+                    thinking=turn.content or "",
+                    code=f"Tool: {tool_call.name}",
+                    output=str(result.data) if result.ok else "",
+                    error=result.error,
+                    success=result.ok,
+                    page_url=page.url,
+                )
+            )
+
+            transcript.append(build_tool_result_message(tool_call.id, result))
+
+            if result.data.get("is_final"):
+                final = memory.final_result or {}
+                passed = bool(final.get("passed", False))
+                reason = str(final.get("reason", ""))
+                return await _finalize_report(
+                    task=task,
+                    page=page,
+                    settings=settings,
+                    result=TestResult.PASS if passed else TestResult.FAIL,
+                    reason=reason,
+                    step_count=step_num,
+                    steps=steps,
+                    completed_subtasks=_completed_subtasks(task, memory),
+                    start_time=start_time,
+                    output_dir=output_dir,
+                    final_result=final,
+                )
+
+            if _task_timed_out(start_time, task.timeout_seconds):
+                return await _finalize_report(
+                    task=task,
+                    page=page,
+                    settings=settings,
+                    result=TestResult.TIMEOUT,
+                    reason=f"Task exceeded timeout of {task.timeout_seconds}s",
+                    step_count=step_num,
+                    steps=steps,
+                    completed_subtasks=_completed_subtasks(task, memory),
+                    start_time=start_time,
+                    output_dir=output_dir,
+                )
+
+        if memory.failure_streak >= 3:
+            return await _finalize_report(
+                task=task,
+                page=page,
+                settings=settings,
+                result=TestResult.FAIL,
+                reason="Too many consecutive failures",
+                step_count=step_num,
+                steps=steps,
+                completed_subtasks=_completed_subtasks(task, memory),
+                start_time=start_time,
+                output_dir=output_dir,
+            )
+
+    return await _finalize_report(
+        task=task,
+        page=page,
+        settings=settings,
+        result=TestResult.TIMEOUT,
+        reason="Reached max steps",
+        step_count=task.max_steps,
+        steps=steps,
+        completed_subtasks=_completed_subtasks(task, memory),
+        start_time=start_time,
+        output_dir=output_dir,
+    )
 
 
-def _merge_reason_and_points(reason: str, points: list[str]) -> str:
-    clean_points = [p.strip() for p in points if p.strip()]
-    if not clean_points:
-        return reason
-    points_block = "\n".join(f"- {p}" for p in clean_points)
-    return f"{reason}\nIssue points:\n{points_block}"
+def _completed_subtasks(task: Task, memory: SessionMemory) -> list[str]:
+    ordered = [subtask.name for subtask in task.subtasks if subtask.name in memory.completed_subtasks]
+    extras = [name for name in memory.completed_subtasks if name not in ordered]
+    return ordered + extras

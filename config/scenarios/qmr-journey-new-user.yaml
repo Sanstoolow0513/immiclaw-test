@@ -1,0 +1,36 @@
+name: qmr-journey-new-user
+description: >-
+  旅程（单场景整条链）：全新用户从注册到首次移民 agent 对话（注册 → /cases → 新建案件 → 问卷与简历 → /cases/:id/welcome → /cases/:id 主工作区）。
+  需注册开启；否则应失败并说明。
+  若希望由 LLM 按原子场景自主选择并 verify，请使用「python main.py --flow new-user-journey」与 config/flows/new-user-journey.yaml，
+  原子场景为 qmr-smoke-register / qmr-smoke-case-create / qmr-smoke-chat-basic。
+target_url: "{base_url}/register"
+goal: >-
+  使用 new_user（email 含 {timestamp}）完成注册，成功后进入 /cases。
+  新建案件：按 questionnaire 填写并上传 resume_file，提交后经欢迎页（/cases/:id/welcome）进入主工作区（/cases/:id）。
+  确认初始评估或首轮助手回复在超时内出现（文本非空），Todo/阶段进度类面板若存在则可见。
+  全程无白屏与可见错误提示。
+assertions:
+  - "注册成功后到达案件列表（/cases）"
+  - "完成新建案件后 URL 离开 /cases/new"
+  - "简历上传后文件名或成功状态可感知"
+  - "欢迎页展示品牌或引导文案后进入 /cases/:id 形态的工作区"
+  - "约 90–120 秒内收到助手非空回复"
+  - "无持续可见错误提示"
+max_steps: 55
+timeout_seconds: 360
+test_data:
+  new_user:
+    email: "journey-{timestamp}@test.com"
+    password: "JourneyPass123!"
+    name: "旅程测试用户"
+  questionnaire:
+    name: "李四"
+    birth_date: "1988-06-20"
+    employer: "某研究院"
+    position: "首席研究员"
+    industry: "生物技术"
+    education: "博士"
+    major: "分子生物学"
+    immigration_intent: "希望以杰出人才身份移民美国"
+  resume_file: "assets/files/test-resume.pdf"

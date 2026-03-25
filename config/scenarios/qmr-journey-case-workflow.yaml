@@ -1,0 +1,27 @@
+name: qmr-journey-case-workflow
+description: >-
+  旅程（单场景）：已有用户日常工作流 — 登录 → 选案件 → 聊天 → 上传文件 → 带附件追问 → 查看进度/刷新保留历史。
+  覆盖移民 agent 与材料协作主路径。
+  若后续增加对应 config/flows/*.yaml，可将其中步骤拆为 qmr-smoke-* 原子场景做 verify 组装。
+target_url: "{base_url}/login"
+goal: >-
+  使用 credentials 登录，从列表选第一个案件进入 MainWorkspace。
+  发送 message 并等待非空回复；上传 upload_file；再发送 message_with_file。
+  查看 Todo/阶段面板（若 UI 存在）；刷新页面确认消息历史仍在。
+assertions:
+  - "登录后 URL 为 /cases 且列表有案件"
+  - "进入工作区后聊天区可用"
+  - "首轮消息约 60–120 秒内收到非空回复"
+  - "上传后文件名在文件区可见"
+  - "带附件消息后收到非空回复"
+  - "刷新后历史消息仍可见"
+max_steps: 48
+timeout_seconds: 300
+test_data:
+  credentials:
+    email: "journey-workflow@test.com"
+    password: "TestPass123!"
+  case_id: "auto"
+  message: "请帮我分析一下我的材料准备情况"
+  upload_file: "assets/files/test-doc.pdf"
+  message_with_file: "请查看我上传的这份推荐信，帮我评估一下"

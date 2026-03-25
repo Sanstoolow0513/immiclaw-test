@@ -1,4 +1,7 @@
-"""Safe code execution engine for LLM-generated Playwright code."""
+"""Legacy code execution helper kept only for compile/executor tests.
+
+The main task runner no longer uses this module in the production path.
+"""
 
 from __future__ import annotations
 
@@ -66,21 +69,23 @@ _SAFE_BUILTINS = {
 }
 
 # Names injected by the framework — never written back to step_state.
-_FRAMEWORK_NAMES = frozenset({
-    "__builtins__",
-    "__doc__",
-    "__loader__",
-    "__name__",
-    "__package__",
-    "__spec__",
-    "page",
-    "test_data",
-    "report_result",
-    "expect",
-    "asyncio",
-    "re",
-    "json",
-})
+_FRAMEWORK_NAMES = frozenset(
+    {
+        "__builtins__",
+        "__doc__",
+        "__loader__",
+        "__name__",
+        "__package__",
+        "__spec__",
+        "page",
+        "test_data",
+        "report_result",
+        "expect",
+        "asyncio",
+        "re",
+        "json",
+    }
+)
 
 
 def _compile_llm_code(code: str):
@@ -118,10 +123,11 @@ def _persist_state(
 
 async def execute_code(
     code: str,
-    page: "Page",
+    page: Page,
     test_data: dict[str, Any],
     timeout: float = 30.0,
     step_state: dict[str, Any] | None = None,
+    flow_mode: bool = False,
 ) -> ExecutionResult:
     """Execute LLM-generated async Python code in a controlled namespace.
 
@@ -153,12 +159,13 @@ async def execute_code(
         "__builtins__": _SAFE_BUILTINS,
         "page": page,
         "test_data": test_data,
-        "report_result": report_result,
         "expect": _playwright_expect,
         "asyncio": asyncio,
         "re": re_mod,
         "json": json_mod,
     }
+    if not flow_mode:
+        namespace["report_result"] = report_result
 
     # Restore variables persisted from previous steps.
     if step_state:
@@ -179,7 +186,7 @@ async def execute_code(
             coro_or_none = eval(compiled, namespace)  # noqa: S307
             if asyncio.iscoroutine(coro_or_none):
                 await asyncio.wait_for(coro_or_none, timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         # Persist whatever was defined before the timeout so the next step can reuse it.
         if step_state is not None:
             _persist_state(namespace, step_state)

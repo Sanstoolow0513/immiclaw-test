@@ -1,4 +1,4 @@
-"""Configuration loading - merges settings.yaml, .env, and CLI overrides."""
+"""Configuration loading - merges settings.yaml, .env, and task YAMLs."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
-from .models import Settings, Scenario
+from .models import Settings, Task, TaskSubtask
 
 
 def load_settings(config_dir: Path | None = None) -> Settings:
@@ -39,19 +39,46 @@ def load_settings(config_dir: Path | None = None) -> Settings:
     return settings
 
 
-def load_scenario(scenario_path: str | Path) -> Scenario:
-    """Load a test scenario from a YAML file.
+def load_task(task_path: str | Path) -> Task:
+    """Load a task YAML file.
 
-    Replaces {timestamp} in all string values within test_data.
+    Legacy scenario-shaped YAML is converted to a single-subtask task.
+    Replaces {timestamp} in all string values within ``test_data``.
     """
-    with open(scenario_path, encoding="utf-8") as f:
+    with open(task_path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
     timestamp = str(int(time.time()))
     if "test_data" in data and isinstance(data["test_data"], dict):
         data["test_data"] = _replace_templates(data["test_data"], {"timestamp": timestamp})
 
-    return Scenario(**data)
+    if "start_url" not in data and "target_url" in data:
+        data = _convert_legacy_task_shape(data)
+
+    return Task(**data)
+
+
+def _convert_legacy_task_shape(data: dict[str, object]) -> dict[str, object]:
+    done_when = list(data.get("assertions", []))
+    goal = str(data.get("goal", ""))
+    return {
+        "name": data["name"],
+        "description": data.get("description", ""),
+        "start_url": data["target_url"],
+        "goal": goal,
+        "done_when": done_when,
+        "subtasks": [
+            TaskSubtask(
+                name="complete-task",
+                goal=goal,
+                done_when=done_when,
+            ).model_dump()
+        ],
+        "skills": list(data.get("skills", [])),
+        "max_steps": data.get("max_steps", 30),
+        "timeout_seconds": data.get("timeout_seconds", 120),
+        "test_data": dict(data.get("test_data", {})),
+    }
 
 
 def _replace_templates(obj: object, variables: dict[str, str]) -> object:

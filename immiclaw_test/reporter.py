@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .models import TestReport, TestResult
+from .models import TaskReport, TestResult
 
 _COLORS = {
     TestResult.PASS: "\033[92m",
@@ -16,19 +16,21 @@ _COLORS = {
 _RESET = "\033[0m"
 
 
-def print_report(report: TestReport) -> None:
+def print_report(report: TaskReport) -> None:
     """Print a human-readable report to the console."""
     color = _COLORS.get(report.result, "")
     label = report.result.value.upper()
 
     print()
     print(f"{'=' * 60}")
-    print(f"  Scenario: {report.scenario_name}")
+    print(f"  Task:     {report.task_name}")
     print(f"  Result:   {color}{label}{_RESET}")
     if report.reason:
         print(f"  Reason:   {report.reason}")
     print(f"  Steps:    {report.total_steps}")
     print(f"  Time:     {report.elapsed_seconds:.1f}s")
+    if report.completed_subtasks:
+        print(f"  Done:     {', '.join(report.completed_subtasks)}")
     print(f"{'=' * 60}")
 
     if report.steps:
@@ -41,13 +43,13 @@ def print_report(report: TestReport) -> None:
     print()
 
 
-def save_report(report: TestReport, output_dir: Path | None = None) -> Path:
+def save_report(report: TaskReport, output_dir: Path | None = None) -> Path:
     """Save report as JSON. Returns the file path."""
     if output_dir is None:
         output_dir = Path(__file__).resolve().parent.parent / "artifacts" / "reports"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    filename = f"{report.scenario_name}.json"
+    filename = f"{report.task_name}.json"
     path = output_dir / filename
 
     with open(path, "w", encoding="utf-8") as f:

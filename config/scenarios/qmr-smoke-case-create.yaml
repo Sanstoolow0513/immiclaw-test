@@ -1,0 +1,33 @@
+name: qmr-smoke-case-create
+description: >-
+  冒烟：新建案件（/cases/new 问卷 + 简历上传 → 提交后进入 welcome/工作区）。
+  对应后端案件创建与材料接口；移民 agent 案件工作区依赖有效案件。
+  组装式 Flow：列入「new-user-journey」时，请在对应 config/flows/*.yaml 的 context 中提供与本场景一致的
+  questionnaire、resume_file；执行代码时 test_data 仅来自该 context（与单场景 run 时注入完整本文件不同）。
+target_url: "{base_url}/login"
+goal: >-
+  登录：独立运行本场景时使用 test_data.credentials；在 --flow new-user-journey 等会话中，代码侧 test_data 仅含 flow.context，
+  请使用 context.new_user（email/password）登录（与注册步骤为同一账号），若无 credentials 键属正常。
+  进入「新建案件」，URL 含 /cases/new。按 questionnaire 填写表单（姓名、出生日期、工作单位、职务、行业、学历、专业、移民意向等必填项），
+  上传 resume_file 指定简历，提交后 URL 离开 /cases/new；返回案件列表应能看到新案件名称。
+assertions:
+  - "新建案件页 URL 含 /cases/new 且表单可见"
+  - "上传简历后文件名或上传成功状态在页面上可感知"
+  - "提交后 URL 变化（离开 /cases/new）"
+  - "回到案件列表后新案件出现在列表中"
+max_steps: 38
+timeout_seconds: 150
+test_data:
+  credentials:
+    email: "case-create@test.com"
+    password: "TestPass123!"
+  questionnaire:
+    name: "张三"
+    birth_date: "1990-01-15"
+    employer: "某科技公司"
+    position: "高级研究员"
+    industry: "人工智能"
+    education: "博士"
+    major: "计算机科学"
+    immigration_intent: "希望通过EB-1A获得美国绿卡"
+  resume_file: "assets/files/test-resume.pdf"

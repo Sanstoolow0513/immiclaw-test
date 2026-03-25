@@ -25,8 +25,8 @@ def load_providers(path: Path | None = None) -> ProvidersFile:
         raw = yaml.safe_load(ep.read_text(encoding="utf-8"))
         return ProvidersFile.model_validate(raw)
 
-    txt = files("immiclaw_test.llm_proxy.data").joinpath("providers.yaml").read_text(
-        encoding="utf-8"
+    txt = (
+        files("immiclaw_test.llm_proxy.data").joinpath("providers.yaml").read_text(encoding="utf-8")
     )
     raw = yaml.safe_load(txt)
     return ProvidersFile.model_validate(raw)

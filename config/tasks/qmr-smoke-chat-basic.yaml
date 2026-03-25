@@ -1,0 +1,23 @@
+name: qmr-smoke-chat-basic
+description: >-
+  冒烟：主工作区 /cases/:id 聊天收发（SSE/流式与 lead agent）。
+  移民 agent 核心路径：用户发消息 → 模型与工具链回复。
+  运行时使用本任务的 test_data 提供登录凭据、案件选择和消息内容。
+target_url: "{base_url}/login"
+goal: >-
+  登录时使用 test_data.credentials。
+  从案件列表选择第一个案件（case_id 为 auto 时选列表首项）进入 MainWorkspace。
+  在聊天输入区发送 message，等待流式回复结束；回复文本长度大于 0，聊天区无可见错误。
+assertions:
+  - "工作区聊天区域与输入框可见"
+  - "发送消息后出现加载/生成中状态"
+  - "约 120 秒内收到 AI 回复（文本非空）"
+  - "回复出现在消息列表中"
+max_steps: 28
+timeout_seconds: 150
+test_data:
+  credentials:
+    email: "chat-basic@test.com"
+    password: "TestPass123!"
+  case_id: "auto"
+  message: "你好，请简单介绍一下EB-1A申请流程"

@@ -1,0 +1,15 @@
+name: login
+type: operation
+description: "登录操作指南"
+applies_to:
+  - qmr-login
+  - qmr-journey-case-workflow
+allowed_tools:
+  - click
+  - fill
+prompt: |
+  当需要执行登录操作时，按以下步骤操作：
+  1. 找到占位符为「请输入账号」的输入框，填入 test_data 中的 account/email
+  2. 找到「请输入密码」的输入框，填入 password
+  3. 点击「登录」按钮
+  4. 等待 URL 离开 /login，预期跳转到 /cases

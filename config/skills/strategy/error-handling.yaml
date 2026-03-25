@@ -1,0 +1,8 @@
+name: error-handling
+type: strategy
+description: "错误处理策略"
+prompt: |
+  遇到页面错误时：
+  - 红色错误提示框：记录内容，判断是否可恢复
+  - 白屏：尝试刷新一次，仍白屏则标记为失败
+  - 控制台错误：不影响测试判断，除非页面功能异常

@@ -1,0 +1,29 @@
+name: qmr-journey-file-management
+description: >-
+  旅程（单场景）：集中整理案件材料 — 多文件夹创建、批量上传、预览、重命名、删除文件。
+  可与未来的 flow YAML 搭配，将步骤映射为多个 smoke 场景的 verify。
+target_url: "{base_url}/login"
+goal: >-
+  登录后进入案件工作区。按 folders 依次创建文件夹；将 upload_files 上传到第一个文件夹；
+  预览文件；将第一个文件夹重命名为 rename_folder_to；删除第二个上传的文件。
+assertions:
+  - "指定文件夹名称均出现在目录中"
+  - "上传文件出现在列表中"
+  - "预览有内容"
+  - "文件夹重命名成功"
+  - "删除文件后该项消失"
+max_steps: 42
+timeout_seconds: 220
+test_data:
+  credentials:
+    email: "journey-files@test.com"
+    password: "TestPass123!"
+  case_id: "auto"
+  folders:
+    - "推荐信"
+    - "获奖材料"
+    - "媒体报道"
+  upload_files:
+    - "assets/files/rec-letter.pdf"
+    - "assets/files/award.pdf"
+  rename_folder_to: "推荐信-已整理"

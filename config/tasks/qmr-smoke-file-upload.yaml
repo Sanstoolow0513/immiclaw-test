@@ -1,0 +1,20 @@
+name: qmr-smoke-file-upload
+description: >-
+  冒烟：工作区文件浏览区上传与预览（案件 workspace 文件 API）。
+  运行时请通过本任务的 test_data 提供 credentials、upload_file 等。
+target_url: "{base_url}/login"
+goal: >-
+  登录后进入含案件的 MainWorkspace，在文件区上传 upload_file，确认列表出现该文件名并可打开预览。
+assertions:
+  - "文件区已渲染（列表或空状态）"
+  - "上传流程可完成且无错误提示"
+  - "上传后文件名出现在列表中"
+  - "点击文件后预览区有内容"
+max_steps: 26
+timeout_seconds: 100
+test_data:
+  credentials:
+    email: "file-upload@test.com"
+    password: "TestPass123!"
+  case_id: "auto"
+  upload_file: "assets/files/test-upload.pdf"
